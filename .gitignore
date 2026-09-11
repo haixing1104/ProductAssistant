@@ -1,5 +1,5 @@
 # --- 环境与密钥（绝不入库）---
-infra/.env
+infra/.env.dev
 infra/.env.prod
 
 # --- Python ---
