@@ -1,0 +1,21 @@
+# --- 环境与密钥（绝不入库）---
+infra/.env
+infra/.env.prod
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# --- Node / 前端 ---
+node_modules/
+dist/
+coverage/
+
+# --- 编辑器 / 系统 ---
+.idea/
+.vscode/
+.DS_Store
