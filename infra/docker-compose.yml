@@ -1,0 +1,122 @@
+# =============================================================================
+# ProductAssistant | infra/docker-compose.yml
+# 用途    : 本地开发基础设施编排（P1）：Redis + Milvus 组（etcd/minio/milvus）默认启动
+#           PostgreSQL 不在此编排：pgsql数据库在宿主机本地实例（见 infra/scripts/pgsql-setup.sh）
+# 使用    : docker compose --env-file infra/.env -f infra/docker-compose.yml up/down -d
+# 说明    :
+#   · pgsql数据库在宿主机本地（默认 127.0.0.1:5432）：建库/建表/授权/种子见
+#     infra/scripts/pgsql-setup.sh（init / verify）；重建（破坏性）见 pgsql-reset.sh
+#   · 应用在容器运行（bridge 网络；容器内 localhost 指向容器自身，不能直连宿主）：
+#       - PostgreSQL（宿主本地）：host.docker.internal:5432；Linux 需在应用服务加
+#         extra_hosts: ["host.docker.internal:host-gateway"]
+#       - Redis / Milvus（本 compose 内）：用服务名 redis:6379 / milvus:19530
+#
+#   redis 7.4.x / Milvus v2.6.x / PostgreSQL(宿主本地) 13+
+# =============================================================================
+
+name: productassistant
+
+services:
+  # -- 配置redis docker 镜像服务 ---
+  redis:
+    image: redis:7.4-alpine
+    container_name: pa-redis
+    # 启动 Redis 时开启 AOF 持久化。
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # 宿主端口可配（REDIS_PORT），容器内恒 6379. 映射宿主端口到容器
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      # 持久化必须挂载 /data，把持久化目录映射到Dockers卷redisdata里
+      - redisdata:/data
+    # 定义容器健康检查
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # --- 配置Milvus 组 （商品文案向量库，RAG召回）：体积大，默认随 compose 启动 ---
+  # Milvus（索引大脑层）无法单独跑，必须依赖etcd（元数据协调层）和minio（数据落地层），
+  # 且etcd和minio必须在Milvus之前启动
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: pa-etcd
+    # 设置etcd的启动命令
+    # 指定广告客户端URL为http://etcd:2379
+    # 监听客户端URL为http://0.0.0.0:2379
+    # 并将数据目录设置为/etcd-data
+    # 配置自动压缩模式为revision，保留1000个修订版本，设置后端存储配额上限为4GB
+    command:
+      - etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd-data
+      - --auto-compaction-mode=revision
+      - --auto-compaction-retention=1000
+      - --quota-backend-bytes=4294967296
+    volumes:
+      - etcddata:/etcd-data
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: pa-minio
+    # 设置minio的环境变量，配置根用户和密码
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      # 映射宿主端口到容器，9000是MinIO的API访问端口，9001是MinIO的Web浏览器控制台端口
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  milvus:
+    image: milvusdb/milvus:v2.6.1
+    container_name: pa-milvus
+    # 设置milvus的启动命令，运行milvus的独立模式
+    command: ["milvus", "run", "standalone"]
+    # 设置milvus的环境变量，配置etcd和minio的地址和端口，设置milvus的监听端口为19530，设置milvus的数据目录为/milvus_data
+    environment:
+      ETCD_ENDPOINTS: "etcd:2379"
+      MINIO_ADDRESS: "minio:9000"
+    ports:
+      # 映射宿主端口到容器，19530是Milvus的gRPC访问端口，9091是Milvus的HTTP访问端口
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvusdata:/var/lib/milvus
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+# 命名卷，用于持久化
+volumes:
+  redisdata:
+    name: pa-redisdata
+  etcddata:
+    name: pa-etcddata
+  miniodata:
+    name: pa-miniodata
+  milvusdata:
+    name: pa-milvusdata
