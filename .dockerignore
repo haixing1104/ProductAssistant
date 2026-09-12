@@ -1,0 +1,7 @@
+# Docker 构建上下文排除项
+.git
+.gitignore
+infra/backups
+**/__pycache__
+**/.pytest_cache
+node_modules

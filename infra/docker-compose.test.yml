@@ -1,0 +1,60 @@
+# =============================================================================
+# ProductAssistant | infra/docker-compose.test.yml
+# 用途    : 数据库测试编排（方案 B）—— 用一次性容器跑 database/tests
+#           宿主机只需 Docker，无需安装 Python / PostgreSQL
+# 使用    : docker compose -f infra/docker-compose.test.yml up --build 
+#             --abort-on-container-exit --exit-code-from tests
+#           docker compose -f infra/docker-compose.test.yml down -v
+# 说明    :
+#   · pgsql-test：官方 postgres:17 临时库，绝不挂载任何生产数据卷；
+#   · tests     ：在容器里跑 pytest（宿主无需 Python）；用服务名 pgsql-test 连库；
+#   · 两个容器都不持久化，down -v 后全部销毁，不影响本机生产库。
+# =============================================================================
+
+name: productassistant-test
+
+services:
+  # 一次性 PostgreSQL（临时库；仅测试期间存活）
+  pgsql-test:
+    image: postgres:17
+    environment:
+      # 测试库超级用户/库名（tests 容器用同一组值连接）
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: productassistant_test
+    # 就绪探针：tests 会等它 healthy 后再启动
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d productassistant_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # 测试执行容器（Python + pytest + psycopg）
+  tests:
+    build:
+      # 构建上下文=仓库根；Dockerfile 位于 database/tests 下
+      context: ..
+      dockerfile: database/tests/Dockerfile
+    depends_on:
+      # 等数据库就绪再跑测试
+      pgsql-test:
+        condition: service_healthy
+    environment:
+      # 数据库连接（服务名 pgsql-test 由 compose 内网 DNS 解析，非 localhost）
+      PGHOST: pgsql-test
+      PGPORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: productassistant_test
+      # 4 个应用角色密码（0001_schema.sql 的 :'admin_pwd' 等，由 conftest 注入）
+      ROLE_PA_ADMIN_PWD: pa_admin_pwd123
+      ROLE_PA_BACKEND_PWD: pa_backend_pwd123
+      ROLE_PA_AI_PWD: pa_ai_pwd123
+      ROLE_PA_AI_SETUP_PWD: pa_ai_setup_pwd123
+    # 挂载源码：改 SQL/测试后无需重建镜像
+    volumes:
+      - ../database:/work/database
+    # 执行测试，-q静默模式
+    command: ["pytest", "-q", "database/tests"]
+    # 不重启，测试完成即退出
+    restart: "no"
