@@ -2,10 +2,11 @@
 # =============================================================================
 # ProductAssistant | scripts/dev-up.sh —— 一键启动本地开发环境（三进程 + 完整 RAG 链路）
 #
-# 用途    : 一条命令起全栈，并把三个进程的日志**实时**打到当前终端（带前缀区分）：
+# 用途    : 一条命令起全栈，并把四个进程的日志**实时**打到当前终端（带前缀区分）：
 #             [backend]   uvicorn pa_backend.main:app   （:8000，统一信封 + SSE + 三个常驻任务）
 #             [ai-engine] python -m src.service         （消费 job:* / 投递 result 与 evt 事件）
 #             [frontend]  npm run dev                   （:5173，/api 代理到 :8000）
+#             [mobile]    npm run dev                   （:5174，移动端 H5，同样代理 /api）
 #           同时日志落盘到 ${TMPDIR:-/tmp}/padev/*.log，终端看得实时、事后可回溯。
 #
 # 停止    : 前台模式直接 Ctrl-C（脚本会收干净三个进程及其子进程）；
@@ -13,9 +14,10 @@
 #           本脚本启动前也会检测「是否已在运行」，避免重复起（两个 worker 会抢同一消费组 PEL）。
 #
 # 用法    : ./scripts/dev-up.sh [选项]
-#             （无参数）      全起：基础设施 + backend + ai-engine + frontend（前台）
+#             （无参数）      全起：基础设施 + backend + ai-engine + frontend + mobile（前台）
 #             --detach       后台运行（日志仅落盘），随后用 dev-logs.sh 跟进
-#             --no-ai        只起 backend + frontend（跳过 ai-engine 与 Milvus 链路）
+#             --no-ai        只起 backend + frontend + mobile（跳过 ai-engine 与 Milvus 链路）
+#             --no-mobile    不起移动端 H5（省内存；桌面端 http.ts/sse.ts 与它共享同一份代码）
 #             --no-infra     不动容器（自己管 Redis/Milvus）
 #             --no-reload    不起 uvicorn --reload（排查 reload 干扰时用）
 #             --strict-env   env-check.sh 有 WARN 也阻断（默认仅提示）
@@ -24,6 +26,7 @@
 # 就绪判据（**探真实依赖，不看进程存活**，避免「进程活着但依赖没好」的假成功）:
 #   · backend  → GET /readyz == 200（PG + Redis 都通才算就绪；/healthz 只证明进程在）
 #   · frontend → GET / 200 且响应含 id="root"（vite 已能编译出 SPA 骨架）
+#   · mobile   → GET :5174/ 200 且响应含 id="root"（移动端 H5 可编译；真机用 http://<本机IP>:5174）
 #   · ai-engine→ Redis 出现 pa:{env}:worker:heartbeat:*（复用 P6 运维口径 = 真在消费）
 #   · milvus   → 容器 Health.Status == healthy（compose healthcheck 探 9091/healthz）
 #
@@ -50,11 +53,13 @@ INFRA_ENV="${ROOT_DIR}/infra/.env"
 BACKEND_DIR="${ROOT_DIR}/backend-api"
 AI_DIR="${ROOT_DIR}/ai-engine"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
+MOBILE_DIR="${ROOT_DIR}/mobile-h5"
 
 # ---------------- 选项 ----------------
 DETACH=0
 WITH_AI=1
 WITH_INFRA=1
+WITH_MOBILE=1
 RELOAD=1
 STRICT_ENV=0
 
@@ -62,16 +67,18 @@ usage() {
   cat <<'EOF'
 用法: ./scripts/dev-up.sh [选项]
 
-  （无参数）    全起：基础设施(redis+etcd+minio+milvus) + backend + ai-engine + frontend（前台）
+  （无参数）    全起：基础设施(redis+etcd+minio+milvus) + backend + ai-engine + frontend + mobile
   --detach      后台运行（日志只落盘）；随后用 ./scripts/dev-logs.sh 跟进
-  --no-ai       只起 backend + frontend（跳过 ai-engine 与 Milvus 链路，省内存）
+  --no-ai       只起 backend + frontend + mobile（跳过 ai-engine 与 Milvus 链路，省内存）
+  --no-mobile   不起移动端 H5（:5174）
   --no-infra    不动容器（Redis/Milvus 你自己管）
   --no-reload   不起 uvicorn --reload
   --strict-env  env-check.sh 出现 WARN 也阻断启动
   -h, --help    显示本帮助
 
-日志: ${TMPDIR:-/tmp}/padev/{backend,ai-engine,frontend}.log（可用 PAD_LOG_DIR 覆盖）
+日志: ${TMPDIR:-/tmp}/padev/{backend,ai-engine,frontend,mobile}.log（可用 PAD_LOG_DIR 覆盖）
       每次启动会把上一轮日志滚成 .log.1（保留 PAD_LOG_KEEP 份，默认 3）—— 不再清空历史现场
+移动端: http://localhost:5174（真机联调：http://<本机局域网IP>:5174 —— 走 vite 代理，无需 CORS）
 停止: 前台 Ctrl-C；后台 ./scripts/dev-down.sh
 
 EOF
@@ -81,6 +88,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --detach)     DETACH=1 ;;
     --no-ai)      WITH_AI=0 ;;
+    --no-mobile)  WITH_MOBILE=0 ;;
     --no-infra)   WITH_INFRA=0 ;;
     --no-reload)  RELOAD=0 ;;
     --strict-env) STRICT_ENV=1 ;;
@@ -110,8 +118,8 @@ on_err() {
   local rc=$?
   echo "" >&2
   fail "dev-up 失败 —— 失败于步骤：${CURRENT_STEP}（rc=${rc}）"
-  echo "     · 日志：tail -n 50 ${LOG_DIR}/backend.log（或 ai-engine.log / frontend.log）" >&2
-  echo "     · 清理：./scripts/dev-down.sh（停三进程；加 --with-infra 连容器一起停）" >&2
+  echo "     · 日志：tail -n 50 ${LOG_DIR}/backend.log（或 ai-engine.log / frontend.log / mobile.log）" >&2
+  echo "     · 清理：./scripts/dev-down.sh（停四进程；加 --with-infra 连容器一起停）" >&2
   exit "${rc}"
 }
 trap on_err ERR
@@ -163,7 +171,7 @@ rotate_log() {
 #   · setsid --fork 后新会话 leader 的 **pgid 必等于自身 pid**（setsid(2) 保证），
 #     于是 `kill -TERM -$pid` 就能连子进程一起收干净，不依赖 ps 的时序与 leader 判定。
 declare -A SVC_PID=()
-COLOR_BACKEND=$'\033[36m'; COLOR_AI=$'\033[35m'; COLOR_FRONT=$'\033[32m'
+COLOR_BACKEND=$'\033[36m'; COLOR_AI=$'\033[35m'; COLOR_FRONT=$'\033[32m'; COLOR_MOBILE=$'\033[33m'
 
 start_service() {
   local name="$1" workdir="$2" color="$3"; shift 3
@@ -223,13 +231,16 @@ pkill_leftovers() {
   pkill -f "pa_backend.main:app" 2>/dev/null || true
   pkill -f "${ROOT_DIR}/ai-engine/.venv/bin/[p]ython -m src.service" 2>/dev/null || true
   pkill -f "${ROOT_DIR}/frontend/node_modules/[.]bin/vite" 2>/dev/null || true
+  # 移动端 H5（同款 vite，但 node_modules 在 mobile-h5/ 下 —— 路径必须分开匹配，
+  # 否则 mobile 的 vite 会被漏掉：dev-down 后 5174 仍占着，下次启动直接端口冲突）
+  pkill -f "${ROOT_DIR}/mobile-h5/node_modules/[.]bin/vite" 2>/dev/null || true
 }
 
 cleanup() {
   local rc=$?
   echo ""
-  echo "${C_STEP}▶ 正在停止三进程…${C_RESET}"
-  stop_services frontend ai-engine backend
+  echo "${C_STEP}▶ 正在停止四进程…${C_RESET}"
+  stop_services mobile frontend ai-engine backend
   pkill_leftovers
   echo "  已全部停止（日志保留在 ${LOG_DIR}）"
   exit "${rc}"
@@ -265,7 +276,8 @@ fi
 for entry in \
   "backend-api/.venv|cd backend-api && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt" \
   "ai-engine/.venv|cd ai-engine && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" \
-  "frontend/node_modules|cd frontend && npm install"; do
+  "frontend/node_modules|cd frontend && npm install" \
+  "mobile-h5/node_modules|cd mobile-h5 && npm install"; do
   path="${entry%%|*}"; hint="${entry#*|}"
   if [ ! -e "${ROOT_DIR}/${path}" ]; then
     fail "缺少 ${path}（依赖未安装）"
@@ -273,7 +285,7 @@ for entry in \
     exit 1
   fi
 done
-ok "依赖目录齐备（backend-api/.venv、ai-engine/.venv、frontend/node_modules）"
+ok "依赖目录齐备（backend-api/.venv、ai-engine/.venv、frontend/node_modules、mobile-h5/node_modules）"
 
 if ! pg_isready -h "${POSTGRES_HOST:-127.0.0.1}" -p "${POSTGRES_PORT:-5432}" >/dev/null 2>&1; then
   fail "PostgreSQL 不可达（${POSTGRES_HOST:-127.0.0.1}:${POSTGRES_PORT:-5432}）"
@@ -283,20 +295,24 @@ fi
 ok "PostgreSQL 可达（数据库 ${POSTGRES_DB:-productassistant}）"
 
 BLOCKERS=0
-for port in "${BACKEND_PORT:-8000}" 5173; do
+PORTS_TO_CHECK=("${BACKEND_PORT:-8000}" 5173)
+[ "${WITH_MOBILE}" = "1" ] && PORTS_TO_CHECK+=(5174)
+for port in "${PORTS_TO_CHECK[@]}"; do
   if port_busy "${port}"; then
     fail "端口 ${port} 已被占用（$(port_owner "${port}" || true)）"
     BLOCKERS=1
   fi
 done
 if [ "${BLOCKERS}" = "1" ]; then
-  echo "     本脚本不静默换端口：8000 写在 vite 代理里、5173 写在文档与 strictPort 约定里。" >&2
+  echo "     本脚本不静默换端口：8000 写在 vite 代理里、5173/5174 写在文档与 strictPort 约定里。" >&2
   echo "     处置：./scripts/dev-down.sh（收掉上次遗留进程），或手工停掉占用者后重试。" >&2
   exit 1
 fi
-ok "端口 ${BACKEND_PORT:-8000} / 5173 空闲"
+ok "端口 $(IFS=/; echo "${PORTS_TO_CHECK[*]}") 空闲"
 
-for name in backend ai-engine frontend; do
+SERVICE_NAMES=(backend ai-engine frontend)
+[ "${WITH_MOBILE}" = "1" ] && SERVICE_NAMES+=(mobile)
+for name in "${SERVICE_NAMES[@]}"; do
   if [ -f "${STATE_DIR}/${name}.pgid" ] && kill -0 "-$(cat "${STATE_DIR}/${name}.pgid")" 2>/dev/null; then
     fail "${name} 似乎已在运行（pgid=$(cat "${STATE_DIR}/${name}.pgid")）"
     echo "     处置：./scripts/dev-down.sh 后再启动（两个 worker 会抢同一消费组 PEL）" >&2
@@ -405,6 +421,12 @@ fi
 
 start_service frontend "${FRONTEND_DIR}" "${COLOR_FRONT}" npm run dev
 
+if [ "${WITH_MOBILE}" = "1" ]; then
+  start_service mobile "${MOBILE_DIR}" "${COLOR_MOBILE}" npm run dev
+else
+  warn "--no-mobile：未启动移动端 H5（:5174）"
+fi
+
 if [ "${DETACH}" = "1" ]; then
   ok "--detach：脚本在后台运行，日志只落盘（跟进：./scripts/dev-logs.sh）"
 fi
@@ -417,6 +439,8 @@ step "S3 就绪探测（/readyz 探 PG+Redis；心跳探消费侧；SPA 骨架�
 
 readyz_ok() { [ "$(http_code "http://127.0.0.1:${BACKEND_PORT:-8000}/readyz")" = "200" ]; }
 frontend_ok() { [ "$(http_code http://127.0.0.1:5173/)" = "200" ]; }
+# 移动端判据与桌面端同口径，只是换端口：200 + 响应含 id="root"（vite 已能编译出 SPA 骨架）
+mobile_ok() { [ "$(http_code http://127.0.0.1:5174/)" = "200" ]; }
 heartbeat_ok() { docker exec pa-redis redis-cli --scan --pattern "pa:${PA_ENV:-dev}:worker:heartbeat:*" 2>/dev/null | grep -q heartbeat; }
 
 if wait_until "等待 backend /readyz" 90 readyz_ok; then
@@ -431,6 +455,15 @@ if wait_until "等待 frontend" 90 frontend_ok; then
 else
   fail "frontend 90s 内未就绪：tail -n 40 ${LOG_DIR}/frontend.log"
   exit 1
+fi
+
+if [ "${WITH_MOBILE}" = "1" ]; then
+  if wait_until "等待 mobile" 90 mobile_ok; then
+    ok "mobile 就绪（:5174 返回 SPA 骨架；真机访问 http://<本机IP>:5174）"
+  else
+    fail "mobile 90s 内未就绪：tail -n 40 ${LOG_DIR}/mobile.log"
+    exit 1
+  fi
 fi
 
 if [ "${WITH_AI}" = "1" ]; then
@@ -450,15 +483,18 @@ echo "=============================================================="
 echo " ProductAssistant 本地环境已就绪"
 echo "--------------------------------------------------------------"
 echo "  前端工作台 : http://localhost:5173      （首次需点「注册新企业」开租户）"
+if [ "${WITH_MOBILE}" = "1" ]; then
+echo "  移动端 H5  : http://localhost:5174      （真机：http://<本机局域网IP>:5174，走 vite 代理无需 CORS）"
+fi
 echo "  后端 API   : http://localhost:${BACKEND_PORT:-8000}/healthz  ·  /readyz  ·  /docs"
 if [ "${WITH_AI}" = "1" ]; then
 echo "  AI 引擎    : worker 心跳见 /ops 页面（运维面板，仅 admin）"
 echo "  Milvus     : http://localhost:9091/healthz · MinIO 控制台 http://localhost:9001"
 fi
 echo "--------------------------------------------------------------"
-echo "  日志       : ${LOG_DIR}/{backend,ai-engine,frontend}.log"
+echo "  日志       : ${LOG_DIR}/{backend,ai-engine,frontend,mobile}.log"
 echo "  停止       : 前台 Ctrl-C"
-echo "  仅后台日志 : ./scripts/dev-logs.sh [backend|ai-engine|frontend|all]"
+echo "  仅后台日志 : ./scripts/dev-logs.sh [backend|ai-engine|frontend|mobile|all]"
 echo "=============================================================="
 echo ""
 
@@ -472,7 +508,7 @@ fi
 trap cleanup INT TERM
 while :; do
   alive=0
-  for name in backend ai-engine frontend; do
+  for name in "${SERVICE_NAMES[@]}"; do
     pid="$(cat "${STATE_DIR}/${name}.pid" 2>/dev/null || true)"
     if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then alive=1; fi
   done

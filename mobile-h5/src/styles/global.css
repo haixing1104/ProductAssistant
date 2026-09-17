@@ -1,0 +1,54 @@
+/* 全局样式：只做「移动端必要的事」，不引入任何 UI 框架重置（antd-mobile 自带样式）。
+   · 100% 高度链 + 安全区变量，避免 iOS 底部横条压住 TabBar / 固定操作栏；
+   · `-webkit-text-size-adjust: 100%`：iOS 横竖屏切换时防止字号被放大；
+   · 正文禁止横向滚动（长 URL / 正则等由组件自己 overflow 处理）。
+   注意：CSS 只支持 `/* *​/` 注释 —— 用 `//` 会让 lightningcss 报「Invalid empty selector」。 */
+:root {
+  --pa-safe-top: env(safe-area-inset-top, 0px);
+  --pa-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --pa-bg: #f5f6f8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--pa-bg);
+  color: #333;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+/* 页面容器：底部留出 TabBar（50px）+ 安全区，避免最后一条内容被 tab 遮住 */
+.pa-page {
+  min-height: 100%;
+  padding-bottom: calc(50px + var(--pa-safe-bottom));
+}
+
+/* 有固定底部操作栏的页面（商品详情 / 审批详情）：再额外留出操作栏高度 */
+.pa-page--actions {
+  padding-bottom: calc(112px + var(--pa-safe-bottom));
+}
+
+/* 等宽展示：正则、线程 ID、错误原因（这些字符串逐字符比对时最有用） */
+.pa-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+/* 长文本（AI 正文、驳回意见、失败原因）：保留换行，不撑破容器 */
+.pa-pre-wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

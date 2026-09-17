@@ -2,10 +2,10 @@
 # =============================================================================
 # ProductAssistant | scripts/dev-down.sh —— 停止 dev-up.sh 启动的全部进程
 #
-# 用途    : 按 pidfile 里的**进程组**停止后端 / AI 引擎 / 前端（连 vite 的 node 子进程、
+# 用途    : 按 pidfile 里的**进程组**停止后端 / AI 引擎 / 前端 / 移动端（连 vite 的 node 子进程、
 #           uvicorn --reload 的 reloader 一起收），再用项目级 pkill 兜底回收 pidfile 之外的残留
-#           （旧 run 遗留、手工起过的进程），避免 8000/5173 被孤儿进程占住。
-# 用法    : ./scripts/dev-down.sh                  # 停三进程（Redis/Milvus 容器保留）
+#           （旧 run 遗留、手工起过的进程），避免 8000/5173/5174 被孤儿进程占住。
+# 用法    : ./scripts/dev-down.sh                  # 停四进程（Redis/Milvus 容器保留）
 #           ./scripts/dev-down.sh --with-infra     # 连容器一起停（数据卷保留，下次冷启动较慢）
 # 设计    : 默认不碰容器 —— Milvus 冷启动要拉镜像 + 30s 起步缓冲，日常收工没必要付这个代价；
 #           数据卷始终保留（如需清空：docker compose -f infra/docker-compose.yml down -v）
@@ -26,8 +26,8 @@ esac
 
 log() { echo "[dev-down] $*"; }
 
-log "停止 ai-engine…"
-for name in frontend ai-engine backend; do
+log "停止 ai-engine / frontend / mobile…"
+for name in mobile frontend ai-engine backend; do
   file="${LOG_DIR}/${name}.pgid"
   if [ -f "${file}" ]; then
     pgid="$(cat "${file}")"
@@ -51,6 +51,7 @@ pkill -f "${ROOT_DIR}/backend-api/.venv/bin/[u]vicorn" 2>/dev/null || true
 pkill -f "pa_backend.main:app" 2>/dev/null || true
 pkill -f "${ROOT_DIR}/ai-engine/.venv/bin/[p]ython -m src.service" 2>/dev/null || true
 pkill -f "${ROOT_DIR}/frontend/node_modules/[.]bin/vite" 2>/dev/null || true
+pkill -f "${ROOT_DIR}/mobile-h5/node_modules/[.]bin/vite" 2>/dev/null || true
 sleep 1
 
 if [ "${WITH_INFRA}" = "1" ]; then

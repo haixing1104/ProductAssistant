@@ -592,7 +592,7 @@ Redis Streams 是 backend ↔ ai-engine 的**唯一业务通道**，因此按队
 
 ##### 10) 本仓边界：哪些调用关系**还不在代码里**
 
-`frontend/src`、`mobile-h5`、`mobile-rn` 目前仍是**空目录**；`backend-api` 已在 P0~P4 落地（见下方「### 五、backend-api 模块」）：
+`mobile-rn` 目前仍是**空目录**（本仓暂不做原生端）；`frontend/`（桌面工作台，P7）与 `mobile-h5/`（移动端 H5，**本轮新增**）已落地；`backend-api` 已在 P0~P4 落地（见下方「### 五、backend-api 模块」）：
 
 | 现实中应存在的一环 | 状态 | 影响 |
 |---|---|---|
@@ -601,6 +601,7 @@ Redis Streams 是 backend ↔ ai-engine 的**唯一业务通道**，因此按队
 | SSE 端点消费 `evt:{thread_id}` 推前端 | ✅ 已实现（**P5**，`routers/stream_router.py` + `services/stream_reader.py`） | 打字机/阶段/图片就绪事件已可推送；短时票据鉴权、`Last-Event-ID` 续传、空闲关流均落地 |
 | `hitl_approvals.content_snapshot` 落库（审批中心展示 AI 生成详情） | ✅ 已实现（`services/workflow_result_consumer._create_pending_approval`） | 列本就在 `0001_schema.sql`，无需迁移 |
 | 前端界面（React + antd） | ✅ 已实现（**P7**，`frontend/`） | 8 条路由（登录/商品/详情/审批/深链/合规/运维/成员），走 backend-api 的 43 个端点；只连 `/api/v1`（不直连 ai-engine/PG） |
+| 移动端 H5（React + antd-mobile） | ✅ 已实现（**P9**，`mobile-h5/`） | 登录 / 商品（列表+详情+SSE 实时生成）/ 审批（列表+详情+深链+批准驳回+补投）/ 我的；**与桌面端共享契约核心层**（`@pa/core` → `frontend/src/{api,services,store,types}`，页面壳各写各的）；只连 `/api/v1` |
 
 **当前仓库内可独立跑通的部分**：`__main__` → worker → 图 → 节点 → 适配器 → PG/Redis/OSS/Milvus，
 以及 `tests/` 里用 `InMemorySaver` 的图级测试（207 个用例，其中 195 个纯内存可跑、12 个需容器化 PG+Redis 否则自动 skip）。
@@ -987,37 +988,42 @@ GET /api/v1/products/{id}/stream?ticket=…    ← SSE：回放 + 尾随（无�
 | `OutboxDeliverer` | 投递审批通知（outbox → 钉钉/控制台） | 指数退避重试，达上限转 `dlq` |
 | `ApprovalRedriveWatchdog` | 补投「已定案但 ai-engine 未收到」的 resume | 同上，且带 Redis 节流防重复投递 |
 
-#### 一键启动（本地三进程 + 完整 RAG 链路）
+#### 一键启动（本地四进程 + 完整 RAG 链路）
 
 ```bash
-./scripts/dev-up.sh          # 前台：三路日志实时滚动（[backend] / [ai-engine] / [frontend]），Ctrl-C 一键收盘
+./scripts/dev-up.sh          # 前台：四路日志实时滚动（[backend]/[ai-engine]/[frontend]/[mobile]），Ctrl-C 一键收盘
 ./scripts/dev-up.sh --detach # 后台：日志落盘 /tmp/padev/*.log，用 ./scripts/dev-logs.sh 跟进
-./scripts/dev-down.sh        # 停三进程（容器保留）；--with-infra 连容器一起停（数据卷保留）
-./scripts/test-frontend.sh   # 前端用例（自带超时与「以文件级 ✓ 判定」的收尾逻辑，见 frontend/README）
+./scripts/dev-down.sh        # 停四进程（容器保留）；--with-infra 连容器一起停（数据卷保留）
+./scripts/test-frontend.sh   # 桌面端用例（自带超时与「以文件级 ✓ 判定」的收尾逻辑，见 frontend/README）
+./scripts/test-mobile.sh     # 移动端 H5 用例（同一判定口径，见 mobile-h5/README）
 ```
 
 脚本做的事（每一步都有可读输出，失败给出确切处置命令）：
 
-1. **前置自检**：`infra/.env` 存在并导出 → `env-check.sh` 快检 → 三个模块的 venv/node_modules 齐备 →
-   PG 可达（`pg_isready`）→ 8000/5173 端口空闲（**占用则指名占用者，不静默换端口**）→ 无上次遗留进程；
+1. **前置自检**：`infra/.env` 存在并导出 → `env-check.sh` 快检 → 四个模块的 venv/node_modules 齐备 →
+   PG 可达（`pg_isready`）→ 8000/5173/5174 端口空闲（**占用则指名占用者，不静默换端口**）→ 无上次遗留进程；
 2. **基础设施**：Redis 缺失自动拉起；etcd/minio/milvus 一并拉起（Milvus 依赖前两者 healthy，
    首启需拉镜像 + 30s 缓冲，长等待每 10s 打印进度）→ Milvus healthy 后**幂等**初始化集合
    `pa_listing_vec`（`database/milvus/init_collections.py`）；容器若已由 `docker run` 手工起（无 compose 标签）
    则直接 `docker start` 复用，避免同名冲突；
-3. **三进程**：各自独立**会话/进程组**启动（`setsid --fork`），日志实时加前缀回显 + 同时落盘**原始行**
+3. **四进程**：各自独立**会话/进程组**启动（`setsid --fork`），日志实时加前缀回显 + 同时落盘**原始行**
    （可 grep/回溯）；`PYTHONUNBUFFERED=1` 保证 Python 逐行实时；
 4. **就绪探测**（探真实依赖，不看进程存活）：backend `/readyz`（PG+Redis 都通才算好）、
-   frontend 返回含 `id="root"` 的 SPA、ai-engine 出现 `pa:{env}:worker:heartbeat:*`（真在消费）；
+   frontend 与 mobile 返回含 `id="root"` 的 SPA、ai-engine 出现 `pa:{env}:worker:heartbeat:*`（真在消费）；
    Milvus 未就绪**不阻塞**启动，只告警「RAG 降级」（worker 本身支持降级运行）；
 5. **停止**：按进程组 `TERM → 2s → KILL`，连 vite 的 node 子进程、uvicorn 的 reloader 一起收，
    再用项目级 `pkill` 兜底 —— 保证不留孤儿占住端口。
 
-常用开关：`--no-ai`（只起前后端，省内存）、`--no-infra`（不动容器）、`--no-reload`、`--strict-env`（env-check 的 WARN 也阻断）。
+常用开关：`--no-ai`（只起前后端，省内存）、`--no-mobile`（不起移动端 H5）、`--no-infra`（不动容器）、
+`--no-reload`、`--strict-env`（env-check 的 WARN 也阻断）。
 
-#### 日志与排障（三进程 + 跨进程串接）
+> 移动端真机联调：手机与开发机同网段时直接访问 `http://<本机局域网IP>:5174`
+> —— 它和桌面端一样走 vite 的 `/api` 代理，**不需要 CORS**、也不需要改 `BACKEND_CORS_ORIGINS`。
+
+#### 日志与排障（四进程 + 跨进程串接）
 
 ```bash
-./scripts/dev-logs.sh all            # 或 backend / ai-engine / frontend（带服务前缀实时跟随）
+./scripts/dev-logs.sh all            # 或 backend / ai-engine / frontend / mobile（带服务前缀实时跟随）
 grep -a 'POST /api/v1/products'      /tmp/padev/backend.log   # 触发生过生成没
 grep -a '/stream?ticket'             /tmp/padev/backend.log   # SSE 连了几次（「生成后 0 次」= 前端没重连）
 grep -a 'result-consumer'            /tmp/padev/backend.log   # 结果是否被消费、商品被推进到什么状态

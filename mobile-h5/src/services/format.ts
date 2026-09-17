@@ -1,0 +1,105 @@
+// 移动端专用展示工具（纯函数，便于单测）。
+//
+// 为什么需要「颜色翻译」这一层: 共享核心层（@pa/core/services/*）里的颜色是**桌面端 antd 口径**
+// （`green` / `gold` / `red` / `processing`…），而 antd-mobile 的 `Tag` 只认
+// `default | primary | success | warning | danger` 或自定义色值 —— 直接把 `gold` 塞进去会**静默失效**，
+// 变成灰色 Tag（扫视找异常的能力就此丢失，这正是审批列表最关键的锚点）。
+export type MobileTagColor = "default" | "primary" | "success" | "warning" | "danger";
+
+/** antd 预设色 → antd-mobile Tag 色（未识别时回落 default，绝不抛错）。 */
+export function toTagColor(color?: string | null): MobileTagColor {
+  switch (color) {
+    case "green":
+    case "success":
+      return "success";
+    case "gold":
+    case "orange":
+    case "volcano":
+    case "warning":
+    case "processing":
+      return "warning";
+    case "red":
+    case "error":
+      return "danger";
+    case "blue":
+    case "geekblue":
+    case "primary":
+    case "cyan":
+    case "purple":
+      return "primary";
+    default:
+      return "default";
+  }
+}
+
+/**
+ * 时间格式化：手机列表行宽有限，用「今年省年份」的紧凑格式。
+ *
+ * 参数:
+ *   iso: ISO 时间串（后端返回 `created_at` 等）；非法/空 → "-"。
+ *   now: 参考时刻（默认当前；测试注入以去掉墙钟依赖）。
+ */
+export function formatTime(iso?: string | null, now: Date = new Date()): string {
+  if (!iso) return "-";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "-";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return date.getFullYear() === now.getFullYear() ? stamp : `${date.getFullYear()}-${stamp}`;
+}
+
+/**
+ * 相对时间（审批列表比绝对时间更有用：审核员关心「压了多久」）。
+ * <1min 刚刚 / <60min N 分钟前 / <24h N 小时前 / 其它走 formatTime。
+ */
+export function relativeTime(iso?: string | null, now: Date = new Date()): string {
+  if (!iso) return "-";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "-";
+  const diffMs = now.getTime() - date.getTime();
+  if (diffMs < 0) return formatTime(iso, now); // 时钟漂移：不显示「-3 分钟前」误导人
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return formatTime(iso, now);
+}
+
+/** 价格展示（后端是 numeric，经 JSON 可能是字符串）。 */
+export function formatPrice(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "-";
+  const num = typeof value === "string" ? Number(value) : value;
+  if (Number.isNaN(num)) return "-";
+  return `¥ ${num}`;
+}
+
+/** 超长文本截断（正则、错误原因在列表里的展示用）。 */
+export function truncate(text?: string | null, max = 60): string {
+  if (!text) return "";
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+/** 秒 → 人类可读（心跳 TTL / 重试间隔）。 */
+export function formatSeconds(seconds?: number | null): string {
+  if (seconds === null || seconds === undefined) return "-";
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  return `${Math.floor(minutes / 60)} 小时`;
+}
+
+/**
+ * 桌面端基址（「我的」页把只在电脑端实现的模块指向桌面端）。
+ *
+ * 规则（与两套前端的部署形态一一对应）:
+ *   · dev（本仓库的一键启动）：移动端固定 :5174、桌面端固定 :5173，同一 hostname
+ *     —— cookie 与 host 绑定、与端口无关，所以在**同一浏览器**里两边共享登录态；
+ *   · 生产：两套前端同域部署（`/` 桌面、`/m/` 移动），桌面端就是同源根路径 → 返回 ""，
+ *     调用方拼出来的是 `/ops` 这样的相对路径。
+ * 抽成纯函数（注入 location）是为了能单测，不去 mock 全局 window。
+ */
+export function desktopBaseUrl(loc: { protocol: string; hostname: string; port: string }): string {
+  return loc.port === "5174" ? `${loc.protocol}//${loc.hostname}:5173` : "";
+}
+
