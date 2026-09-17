@@ -1,0 +1,13 @@
+# 仅工具配置（不承载依赖；依赖以 requirements*.txt 为准）
+# 包根是 src：运行入口 `uvicorn pa_backend.main:app --app-dir src`，因此 pythonpath 指向 src；
+# 另加 "." 是为了让用例之间可以互相复用工具函数（`from tests.conftest import …`，
+# tests/ 下带 __init__.py 使其成为常规包，避免依赖 pytest 的隐式 sys.path 插入行为）。
+[tool.pytest.ini_options]
+pythonpath = [".", "src"]
+testpaths = ["tests"]
+addopts = "-q"
+# 异步用例（SQLAlchemy async + httpx ASGITransport）统一自动识别，无需逐条加装饰器。
+# 事件循环作用域固定为 function：本套件里异步夹具（app / engine / session）都是**函数级**，
+# 与 session 级循环混用会触发 "attached to a different loop" 这类假失败。
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

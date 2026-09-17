@@ -17,6 +17,10 @@
 #   PA_TEST_*  = 测试专属覆盖（tests / *-test compose）
 #   PGHOST/PGPORT = 由 POSTGRES_* 派生（脚本与测试内自带默认值）
 #   LANGGRAPH_STRICT_MSGPACK = 代码 setdefault 注入的库内加固，非用户配置项
+# 扫描范围:
+#   · 运行时源码 = ai-engine/src、backend-api/src（各模块 tests/ 不参与：那里的键按 PA_TEST_* 豁免口径管理）
+#   · 前端只收 VITE_* 前缀（Vite 编译期注入；import.meta.env / process.env 两种写法）
+#   · compose = infra/docker-compose*.yml 的 ${VAR} 引用
 # 注意    : 只输出键名与原因，绝不打印键值（避免密钥进入日志）。
 # =============================================================================
 set -euo pipefail
@@ -47,7 +51,8 @@ esac
 [ -f "$ENV_FILE" ] || { echo "!! 缺少 $ENV_FILE（先跑 ./infra/scripts/env-init.sh）" >&2; exit 1; }
 
 # 豁免名单：见头部注释（新增豁免必须写明理由）
-EXEMPT="PA_TEST_LLM PA_TEST_PG_DSN PA_TEST_PG_SETUP_PG_DSN PGHOST PGPORT LANGGRAPH_STRICT_MSGPACK"
+EXEMPT="PA_TEST_LLM PA_TEST_PG_DSN PA_TEST_PG_SETUP_PG_DSN PGHOST PGPORT LANGGRAPH_STRICT_MSGPACK \
+PA_TEST_BACKEND_PG_DSN PA_TEST_REDIS_URL PA_TEST_SUPERUSER_DSN"
 
 # 密钥类键（值不应是占位/弱口令/空）与弱口令启发式
 # ROOT_USER 单列：MinIO 的 root 用户与口令同值（minioadminADMIN）也是生产大忌，但不牵连 POSTGRES_USER
@@ -60,11 +65,22 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # --- 三方键集合 ---
 # 提取键名：按第一个 `"` 切分再删尾引号
 # （不能用 `s/.*"//`：贪婪匹配会一路吃到行尾引号，把整行清空 → 键集恒为空）
+# 扫描范围见头部「扫描范围」：运行时源码两个模块 + 前端 VITE_*（tests 目录不参与）
 {
-  grep -rhoE 'os\.getenv\([[:space:]]*"[A-Z0-9_]+"' "${ROOT_DIR}/ai-engine/src" --include='*.py' || true
-  grep -rhoE 'os\.environ\.get\([[:space:]]*"[A-Z0-9_]+"' "${ROOT_DIR}/ai-engine/src" --include='*.py' || true
-  grep -rhoE 'os\.environ\.setdefault\([[:space:]]*"[A-Z0-9_]+"' "${ROOT_DIR}/ai-engine/src" --include='*.py' || true
-  grep -rhoE 'os\.environ\[[[:space:]]*"[A-Z0-9_]+"' "${ROOT_DIR}/ai-engine/src" --include='*.py' || true
+  for src_dir in "${ROOT_DIR}/ai-engine/src" "${ROOT_DIR}/backend-api/src"; do
+    [ -d "$src_dir" ] || continue
+    grep -rhoE 'os\.getenv\([[:space:]]*"[A-Z0-9_]+"' "$src_dir" --include='*.py' || true
+    grep -rhoE 'os\.environ\.get\([[:space:]]*"[A-Z0-9_]+"' "$src_dir" --include='*.py' || true
+    grep -rhoE 'os\.environ\.setdefault\([[:space:]]*"[A-Z0-9_]+"' "$src_dir" --include='*.py' || true
+    grep -rhoE 'os\.environ\[[[:space:]]*"[A-Z0-9_]+"' "$src_dir" --include='*.py' || true
+    # pydantic-settings 的显式别名（backend-api 用）：validation_alias="BACKEND_PORT"
+    grep -rhoE '(validation_alias|alias)=[[:space:]]*"[A-Z0-9_]+"' "$src_dir" --include='*.py' || true
+  done
+  if [ -d "${ROOT_DIR}/frontend/src" ]; then
+    grep -rhoE "(import\.meta\.env|process\.env)[.[]?['\"]?VITE_[A-Z0-9_]+" "${ROOT_DIR}/frontend/src" \
+      --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
+      | grep -oE 'VITE_[A-Z0-9_]+' || true
+  fi
 } | sed -E 's/^[^"]*"//; s/"$//' | sort -u > "$TMP_DIR/code"
 
 grep -rhoE '\$\{[A-Z0-9_]+' "${ROOT_DIR}"/infra/docker-compose*.yml \

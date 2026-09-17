@@ -1,0 +1,92 @@
+# =============================================================================
+# ProductAssistant | infra/docker-compose.backend-test.yml
+# 用途    : backend-api 测试编排 —— 一次性 PostgreSQL + Redis + pytest 容器
+#           宿主机只需 Docker（无需安装 Python / PostgreSQL / Redis）
+# 使用    : docker compose -f infra/docker-compose.backend-test.yml up --build \
+#             --abort-on-container-exit --exit-code-from backend-tests
+#           docker compose -f infra/docker-compose.backend-test.yml down -v
+# 说明    :
+#   · pgsql-test：官方 postgres:17 临时库，**不挂任何数据卷**；schema 由
+#     backend-api/tests/conftest.py 用 database/sql/*.sql 灌入，数据用例内造、用例后清；
+#   · redis     ：探针/投递/消费用例使用，键前缀 PA_ENV=test + DB 15 与本地 dev 隔离；
+#   · backend-tests：装 backend-api 全量依赖跑 pytest；源码以挂载方式注入，改代码无需重建镜像；
+#   · 三个容器都不持久化，down -v 后整体销毁 —— 宿主机 productassistant 库全程不被触碰；
+#   · 与 ai-engine 的 docker-compose.ai-test.yml 刻意错开宿主端口（55432/56379 已是 ai-test 在用，
+#     本文件用 55433/56380），两个套件可以同时跑而互不抢占端口。
+# =============================================================================
+
+name: productassistant-backend-test
+
+services:
+  # 一次性 PostgreSQL（临时库；测试期间存活，down -v 即销毁）
+  pgsql-test:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: productassistant_test
+    ports:
+      # 供宿主机直连做快速迭代（可选）：DSN 指向 127.0.0.1:55433（仍不是宿主库）
+      - "55433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d productassistant_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # 一次性 Redis（探针/投递用例；不开启 AOF，数据随容器销毁）
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    ports:
+      - "56380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # 测试执行容器（Python + backend-api 依赖 + pytest）
+  backend-tests:
+    build:
+      # 构建上下文=仓库根；Dockerfile 位于 backend-api/tests 下
+      context: ..
+      dockerfile: backend-api/tests/Dockerfile
+    depends_on:
+      pgsql-test:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 环境标识参与 Redis 键前缀 pa:{env}:...（与本地 dev 隔离）
+      PA_ENV: test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: productassistant_test
+      # 4 个应用角色密码（0001_schema.sql 的 :'admin_pwd' 等，由 conftest 注入）
+      ROLE_PA_ADMIN_PWD: pa_admin_pwd123
+      ROLE_PA_BACKEND_PWD: pa_backend_pwd123
+      ROLE_PA_AI_PWD: pa_ai_pwd123
+      ROLE_PA_AI_SETUP_PWD: pa_ai_setup_pwd123
+      # 三类 DSN：超级用户灌 schema / role_pa_backend 造数据与连库（被测应用）/ Redis
+      PA_TEST_SUPERUSER_DSN: postgresql://postgres:postgres@pgsql-test:5432/productassistant_test
+      PA_TEST_BACKEND_PG_DSN: postgresql://role_pa_backend:pa_backend_pwd123@pgsql-test:5432/productassistant_test
+      PA_TEST_REDIS_URL: redis://redis:6379/15
+      # 被测应用的实际连接串由 conftest 从上面两个 PA_TEST_* 归一注入（见 conftest 模块级环境归一）
+      JWT_SECRET: test-jwt-secret-for-pytest
+      # 通知投递默认 console（不真的出站）；要联调真实钉钉时覆盖该值并给 webhook
+      NOTIFY_MODE: "console"
+      NOTIFY_DINGTALK_WEBHOOK_URL: ""
+      # OSS 凭据留空 = 预签名接口按未配置处理（相关用例 skip 或断言降级行为）
+      OSS_ENDPOINT: ""
+      OSS_BUCKET: ""
+      OSS_ACCESS_KEY_ID: ""
+      OSS_ACCESS_KEY_SECRET: ""
+    # 挂载源码：改代码/SQL/测试后无需重建镜像
+    volumes:
+      - ../backend-api:/work/backend-api
+      - ../database:/work/database
+    # pytest 配置见 backend-api/pyproject.toml（pythonpath=["src"] / testpaths=["tests"]）
+    working_dir: /work/backend-api
+    command: ["pytest", "-q", "tests"]
+    restart: "no"

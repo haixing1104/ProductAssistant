@@ -1,0 +1,22 @@
+# backend-api 运行依赖
+# 规则：仅 stable、禁 pre-release；精确补丁在安装后冻结锁文件
+# 依赖隔离红线：本模块与 ai-engine 各自独立 venv，严禁合并（AI 依赖与 Web 依赖互不污染）
+#
+# 版本基线：与本地验证过的 ProductPilot backend 环境一致（Python 3.12）
+# 说明：
+#   · psycopg[binary] —— async SQLAlchemy 走 postgresql+psycopg 驱动；slim 镜像无 libpq 故用 binary
+#   · python-jose[cryptography] —— JWT（access / SSE 短时票据 / 审批深链票据）
+#   · passlib + bcrypt —— 口令哈希；bcrypt 卡在 4.0.x 是 passlib 1.7.4 的兼容上限
+#   · httpx —— 钉钉 webhook 投递（后续 SMTP/飞书同层）
+fastapi>=0.141,<0.142
+uvicorn[standard]>=0.52,<0.53
+SQLAlchemy>=2.0,<2.1
+psycopg[binary]>=3.3,<3.4
+redis>=8.1,<9.0
+pydantic>=2.13,<3.0
+pydantic-settings>=2.6,<3.0
+python-jose[cryptography]>=3.3,<4.0
+passlib>=1.7,<2.0
+bcrypt>=4.0,<4.1          # passlib 1.7.4 兼容上限约束，勿上调
+python-multipart>=0.0.9,<0.1
+httpx>=0.28.1,<0.29

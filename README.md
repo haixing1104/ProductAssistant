@@ -486,8 +486,8 @@ node.agent_research_node(state, agent_runtime, reader, rule_engine, rag_store, m
 
 | 出站键 | 内容 | 谁消费 | 语义 |
 |---|---|---|---|
-| `pa:{env}:evt:{thread_id}` | 过程事件 + 终态事件 | backend SSE 端点（**待实现**）→ 前端 | **前端实时过程（打字机/阶段/图片就绪）唯一数据源**；已做保留策略：`MAXLEN ~ AI_ENGINE_STREAM_MAXLEN_EVT`（默认 2000，只影响断线回放深度）+ 每次发布刷新 `EXPIRE AI_ENGINE_EVT_TTL_SECONDS`（默认 7 天，到期整流回收） |
-| `pa:{env}:result:workflow` | 图终态结果 | backend `WorkflowResultConsumer`（**待实现**） | **驱动商品状态机**（published / awaiting_human / rejected / failed）；`content_snapshot` 仅在 `awaiting_human` 时携带 |
+| `pa:{env}:evt:{thread_id}` | 过程事件 + 终态事件 | backend SSE 端点（✅ 已实现，P5）→ 前端 | **前端实时过程（打字机/阶段/图片就绪）唯一数据源**；已做保留策略：`MAXLEN ~ AI_ENGINE_STREAM_MAXLEN_EVT`（默认 2000，只影响断线回放深度）+ 每次发布刷新 `EXPIRE AI_ENGINE_EVT_TTL_SECONDS`（默认 7 天，到期整流回收） |
+| `pa:{env}:result:workflow` | 图终态结果 | backend `WorkflowResultConsumer`（✅ 已实现，P4） | **驱动商品状态机**（published / awaiting_human / rejected / failed）；`content_snapshot` 仅在 `awaiting_human` 时携带 |
 | `pa:{env}:lock:{thread_id}` | 互斥令牌 | worker ↔ worker | 审批恢复串行化（`SET NX EX` + Lua CAS 释放） |
 
 **`evt:{thread_id}` 的完整事件清单**（按链路出现顺序）：
@@ -592,14 +592,15 @@ Redis Streams 是 backend ↔ ai-engine 的**唯一业务通道**，因此按队
 
 ##### 10) 本仓边界：哪些调用关系**还不在代码里**
 
-`backend-api/src`、`backend-api/tests`、`frontend/src`、`mobile-h5`、`mobile-rn` 目前均为**空目录**，因此下列环节只有约定、没有实现：
+`frontend/src`、`mobile-h5`、`mobile-rn` 目前仍是**空目录**；`backend-api` 已在 P0~P4 落地（见下方「### 五、backend-api 模块」）：
 
 | 现实中应存在的一环 | 状态 | 影响 |
 |---|---|---|
-| backend 投递 `job:generate` / `job:approval` / `job:product_purge` | ❌ 未实现 | 现在只能手工 `XADD`（`tests/test_worker_e2e.py` 就是当前的生产者替身） |
-| backend `WorkflowResultConsumer` 消费 `result:workflow` 推 `products.status` | ❌ 未实现 | 终态结果发出去后没人接 |
-| SSE 端点消费 `evt:{thread_id}` 推前端 | ❌ 未实现 | 打字机/图片就绪事件当前无消费者 |
-| `hitl_approvals.content_snapshot` 落库（审批中心展示 AI 生成详情） | ❌ 未实现 | `worker._review_snapshot()` 已把数据备好，等后端写列 |
+| backend 投递 `job:generate` / `job:approval` / `job:product_purge` | ✅ 已实现（`backend-api/src/pa_backend/services/ai_engine_client.py`） | 载荷含入队瞬间固化的 `rules` 合规快照 |
+| backend `WorkflowResultConsumer` 消费 `result:workflow` 推 `products.status` | ✅ 已实现（`services/workflow_result_consumer.py`，含 5 条幂等/边界加固） | 终态结果有人接了；5 条加固见 `backend-api/README.md` §2.5 |
+| SSE 端点消费 `evt:{thread_id}` 推前端 | ✅ 已实现（**P5**，`routers/stream_router.py` + `services/stream_reader.py`） | 打字机/阶段/图片就绪事件已可推送；短时票据鉴权、`Last-Event-ID` 续传、空闲关流均落地 |
+| `hitl_approvals.content_snapshot` 落库（审批中心展示 AI 生成详情） | ✅ 已实现（`services/workflow_result_consumer._create_pending_approval`） | 列本就在 `0001_schema.sql`，无需迁移 |
+| 前端界面（React + antd） | ✅ 已实现（**P7**，`frontend/`） | 8 条路由（登录/商品/详情/审批/深链/合规/运维/成员），走 backend-api 的 43 个端点；只连 `/api/v1`（不直连 ai-engine/PG） |
 
 **当前仓库内可独立跑通的部分**：`__main__` → worker → 图 → 节点 → 适配器 → PG/Redis/OSS/Milvus，
 以及 `tests/` 里用 `InMemorySaver` 的图级测试（207 个用例，其中 195 个纯内存可跑、12 个需容器化 PG+Redis 否则自动 skip）。
@@ -925,6 +926,147 @@ ai-engine/
     ├── test_image_cogview_payload.py    # 生图：watermark_enabled 契约 + 模型尺寸收敛矩阵 + 图床下载流程
     └── Dockerfile                       # 集成测试镜像（由 infra/docker-compose.ai-test.yml 构建）
 ```
+
+---
+
+### 五、backend-api 模块（P0~P4 已落地）
+
+> 模块级契约细节、API 面清单、与 ProductPilot 的取舍：见 **`backend-api/README.md`**（该文件是 backend 侧契约的单一事实源）。
+
+#### 模块介绍
+
+- backend-api 为业务 API 网关层（FastAPI + async SQLAlchemy + PostgreSQL + Redis），**不含任何 AI 逻辑**：
+  不调 LLM、不跑 LangGraph、不写 `schema_pa_ai` 业务表（只读 `product_contents` / `evaluation_logs`）。
+- 唯一身份：**frontend 只与 backend 交互**（绝不跨层直连 ai-engine）；backend 与 ai-engine **只经 Redis Streams 通信**。
+- 数据库角色：只以 `role_pa_backend` 连库（`database/sql/0002_roles_grants.sql` 矩阵）；
+  `delete_audits` 仅 SELECT/INSERT（`0004` 已 REVOKE UPDATE/DELETE —— 审计只能追加）。
+- 商品状态机（`products.status`）与任务状态（`generation_jobs.status`）**只有 backend 能写**：
+  ai-engine 把终态发到 `result:workflow`，由本模块的消费器推进。
+
+#### 闭环（一条命令到一次状态推进）
+
+```text
+POST /api/v1/products/{id}/generate
+└─ ProductService.trigger_generation
+   ├─① 守卫：商品非 deleted/archived、且无进行中任务（防重复触发）
+   ├─② 建 generation_jobs(running) + products.status='generating' + 绑定 active_thread_id
+   ├─③ 入队瞬间固化 rules 合规快照（含 effective_at/expires_at 时效过滤）
+   ├─④ commit 之后 XADD job:generate（投递失败 → 回滚状态并报 503，绝不卡在 generating）
+   └─⑤ ai-engine ListingsWorker 消费 → 图执行 → 发回 result:workflow
+      └─ WorkflowResultConsumer（常驻）
+         ├─ published      → products.published      + jobs.succeeded
+         ├─ awaiting_human → products.waiting_approval + jobs.waiting_input
+         │                   + hitl_approvals(pending, content_snapshot) + notification_outbox
+         ├─ rejected       → products.draft          + jobs.failed
+         └─ failed         → products.draft          + jobs.failed
+POST /api/v1/approvals/{id}/approve|reject
+└─ ApprovalService.decide（CAS：UPDATE … WHERE status='pending'）→ commit → XADD job:approval
+   └─ ai-engine resume 图 → 再发 result:workflow（published / rejected）
+      漏投兜底：ApprovalRedriveWatchdog（Redis SETNX 节流）与 POST /approvals/{id}/redrive
+```
+
+#### 实时过程（SSE，P5）
+
+```text
+GET /api/v1/products/{id}/stream-ticket      ← Bearer access 换短时票据（kind=sse，绑定商品，默认 120s）
+GET /api/v1/products/{id}/stream?ticket=…    ← SSE：回放 + 尾随（无票据时兼容 Bearer，便于 curl 排查）
+   ├─① 校验票据（kind / 绑定商品 / org）+ 商品归属 → 越权与不存在一律 404
+   ├─② 状态门：products.status ∈ {generating, waiting_approval} 才回放/尾随；
+   │     其余状态 → 只发一条 ready 控制帧并关流（避免前端把已结束任务当「生成中」空转）
+   ├─③ 回放 evt:{thread_id}（支持 Last-Event-ID 续传；XRange 用独占下界 → 不重发）
+   ├─④ 每 ~0.25s 增量尾随（同步 Redis 丢线程池；见 services/stream_reader 的踩坑说明）
+   └─⑤ 终态关流：done / rejected / failed / hitl.waiting
+         空闲关流：注释帧 `: stream-idle-close`（前端带 Last-Event-ID 自动续连）
+```
+
+#### 三个常驻任务（`create_app` 的 lifespan 启动；`PA_ENV=test` 不启动）
+
+| 任务 | 作用 | 失败时 |
+|---|---|---|
+| `WorkflowResultConsumer` | 消费 `result:workflow` 推进状态机 | 单轮异常退避重试，**不退出进程** |
+| `OutboxDeliverer` | 投递审批通知（outbox → 钉钉/控制台） | 指数退避重试，达上限转 `dlq` |
+| `ApprovalRedriveWatchdog` | 补投「已定案但 ai-engine 未收到」的 resume | 同上，且带 Redis 节流防重复投递 |
+
+#### 运行与测试
+
+```bash
+# 依赖隔离：本模块与 ai-engine 各自独立 venv，严禁合并
+cd backend-api && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+# 本地运行（宿主已起 PG；Redis 见 infra/docker-compose.yml）
+set -a && source ../infra/.env && set +a
+.venv/bin/uvicorn pa_backend.main:app --app-dir src --port "${BACKEND_PORT:-8000}"
+
+# 测试（宿主机只需 Docker：一次性 PG + Redis + pytest，160 例）
+docker compose -f infra/docker-compose.backend-test.yml up --build \
+  --abort-on-container-exit --exit-code-from backend-tests
+docker compose -f infra/docker-compose.backend-test.yml down -v
+```
+
+#### 契约互补点（两侧互不共享代码，靠契约对齐 —— 改一处必须改另一处）
+
+| # | 事实 | backend 的对应做法 |
+|---|---|---|
+| 1 | ai-engine 的 `compile_rules_snapshot` **不做时间过滤** | 时效过滤在**入队瞬间**完成（`repositories/compliance.build_rules_snapshot`） |
+| 2 | `products.raw_images` 规范形状 = `list[str]` 公有 URL 数组 | 写入即规范化；响应层同时兼容历史 `[{url:…}]` 形状（`schemas.serialize_product`） |
+| 3 | `_handle_purge` 守卫：商品行仍存在 → **中止清理并 ack 丢弃** | 彻底删除**物理删行 + commit 之后**才投递 `job:product_purge`（见 `backend-api/README.md` §2.7） |
+| 4 | purge 只清 `product_contents` 的 image，**不含** `products.raw_images` | 上传原件由 backend 自己删（`services/oss.delete_urls`，`img/pa/` 白名单） |
+| 5 | 重复投递返回 `duplicate`/`busy` 属正常 | 消费器按「已终态跳过」处理，不当作错误上报 |
+| 6 | 合规匹配语义（最长匹配 → 左优先去重叠 → 正则 finditer → 按严重级稳定排序） | 预览匹配器 `services/compliance_matcher.py` 逐条对齐；一致性由用例锁定（改一侧必须改另一侧） |
+| 7 | 坏正则在 ai-engine 侧**静默跳过** | `/compliance/rules` 入参当场做语法校验，把「看起来生效其实没拦」挡在入库前 |
+
+#### 合规词库与运维面（P6）
+
+```text
+GET|POST /api/v1/compliance/words          → 词库 CRUD（读：admin/reviewer；写：仅 admin）
+PATCH|DELETE /api/v1/compliance/words/{id}
+GET|POST /api/v1/compliance/rules          → 正则规则 CRUD（入参即校验正则语法）
+PATCH|DELETE /api/v1/compliance/rules/{id}
+GET  /api/v1/compliance/snapshot           → 下一次生成会下发的规则快照（排查「配了却没拦」）
+POST /api/v1/compliance/preview            → 文本命中预览（位置 + 分数 + 是否阻断，
+                                              用「当前快照」跑，与入队口径一致）
+GET  /api/v1/ops/overview                  → worker 心跳（含 stalled 判定）/ 流长度与消费组 PEL / DLQ 概况
+GET  /api/v1/ops/dlq?domain=job:generate   → 死信回看（只读；重投走 backend-api/README 的 SOP）
+```
+
+两条刻意的设计取舍：
+- **全局配置的写只给 admin**：`compliance_*` 没有 `org_id`，改一个词会影响**所有组织**的生成结果；
+- **运维面只读**：DLQ 里的消息是「重试到上限仍失败」的，盲目重投只会再造一条毒消息，
+  处置必须走人工 SOP（先判根因）——所以接口里刻意不提供「一键重投」。
+
+#### 阶段进度（本模块）
+
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| P0 | 契约冻结 + `infra/.env.template` 登记 `BACKEND_*` + `env-check.sh` 扩展扫描范围 | ✅ |
+| P1 | 骨架（config/db/security/deps/keys/middleware/统一信封/探针）+ 容器化测试编排 | ✅ |
+| P2 | 认证（注册/登录/续签轮换/登出）+ 成员 RBAC + 登录失败限流 | ✅ |
+| P3 | 商品 CRUD/彻底删除（软删已按业务决定移除，仅保留显式 405）+ OSS 预签名 + CSV 导入 + 内容版本与轨迹只读 | ✅ |
+| P4 | 生成触发 + `result:workflow` 消费闭环 + 审批 CAS/resume + 通知 outbox + 补投守护 | ✅ |
+| P5 | SSE（`stream-ticket` + `stream`：回放 + 尾随 + 终态/空闲关流 + Last-Event-ID 续传） | ✅ |
+| P6 | 合规词库/规则 CRUD + 快照预览；运维只读面（心跳/PEL/DLQ） | ✅ |
+| P7 | frontend（React 19 + antd 6 + Vite 8）：登录/商品/详情（打字机 + 轨迹）/审批（含深链）/合规/运维/成员，8 条路由 | ✅ |
+| P8 | nginx 双层 + 生产 compose + CI + 全栈冒烟 | ⏳ 待做 |
+
+#### 前端（`frontend/`，P7）
+
+```text
+技术栈 : React 19 + TypeScript + Vite 8 + Ant Design 6 + Zustand + React Query v5 + React Router v7
+红线   : 只访问 /api/v1（dev 由 vite 代理 → :8000；生产由 nginx 同源反代，P8）；绝不直连 ai-engine / PG
+路由   : /login · / (商品) · /products/:id (详情：SSE 打字机 + 轨迹 + 驳回复盘) · /approvals (+ /approvals/:id?ticket=)
+         · /compliance (词库/规则/预览/快照) · /ops (心跳/PEL/DLQ，只读) · /members
+校验   : npx tsc --noEmit（0 错误）· npm test（48 例）· npm run build（生产构建 1617 modules）
+```
+
+三处**照抄 ProductPilot 会错**的 PA 语义（详见 `frontend/README.md` 的表）：
+
+1. `hitl.waiting` 在 PA 是**终态**（服务端随即关流）→ 前端必须停重连并显示「已转人工审批」；
+2. `ready` 是 backend 的控制帧（无进行中任务）→ 显示提示并停止，不空转重连；
+3. 注释帧（`: stream-idle-close` / `: stream-error`）不触发 `onmessage` → 必须文本层区分
+   「空闲关流（续连）」与「读流异常（限量重试）」。
+
+另外：删除**只有彻底删除**一条路径（软删端点已下线 → 405）、错误信封是 `{code,data,message}`（不是 `detail`）、
+OSS 预签名需 `product_id`（图片上传在商品详情页）。
+
 
 
 

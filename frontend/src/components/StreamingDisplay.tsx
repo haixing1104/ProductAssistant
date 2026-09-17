@@ -1,0 +1,233 @@
+// SSE 流式展示（打字机正文 + 阶段流 + 图片就绪），基于 services/sse.ts 的 PA 语义连接器。
+//
+// 与 ProductPilot 版的三点行为差异（都是「照抄会错」的点，改动前先读 services/sse.ts 顶部注释）：
+//   1) `hitl.waiting` 是**终态**：收到即显示「已转人工审批」，**不再重连**（PP 版会一直等 resume）；
+//   2) `ready` 控制帧：显示「无进行中任务」并停止（不空转重连）；
+//   3) 注释帧被区分处理：空闲关流 → 自动续连（带 Last-Event-ID）；读流异常 → 限量重试并告警。
+import { Button, Space, Typography } from "antd";
+import { useEffect, useRef, useState } from "react";
+
+import { connectProductStream, type SseFrame } from "../services/sse";
+
+export interface LiveImage {
+  url: string;
+  alt?: string;
+}
+
+interface Props {
+  productId: string;
+  /** 续连/重试间隔（毫秒；默认 1500，测试注入小值去掉墙钟依赖） */
+  reconnectDelayMs?: number;
+  /** 任意终态（done/rejected/failed/hitl.waiting）触发一次，供父级复位「进行中」状态 */
+  onTerminal?: (type: string) => void;
+  /** 转人工审批（hitl.waiting）时通知一次，供父级立刻刷新商品状态/按钮文案 */
+  onWaiting?: () => void;
+  /** 生成完成（done）时通知一次，供父级拉取最新内容 */
+  onDone?: () => void;
+  height?: number;
+}
+
+// 事件 → 中文阶段行（PA 的 15 类事件 + `ready` 控制帧）
+const TYPE_LABELS: Record<string, string> = {
+  "generate.started": "▶ 开始生成",
+  "stage.researching": "🔎 正在核对数据（Agent）",
+  "agent.tool": "🛠 AI 调用工具",
+  "agent.done": "✔ 数据核对完成",
+  "stage.generating": "✎ 文案生成中…",
+  "stage.evaluating": "⚖ 合规评估中…",
+  "evaluate.result": "✔ 评估结果",
+  "stage.imaging": "🎨 配图整理/生成中…",
+  "image.ready": "✔ AI 配图已就绪",
+  "content.chunk": "",
+  "hitl.waiting": "✋ 需人工审批，已转审批中心",
+  "approval.resumed": "↻ 审批已回传，恢复写入",
+  done: "✔ 生成完成",
+  rejected: "✘ 已被驳回（已退回草稿）",
+  failed: "✘ 生成失败",
+  ready: "（暂无进行中任务）",
+};
+
+/** 把一帧转成可读的阶段行（正文 chunk 返回空串，不占据阶段流）。 */
+export function formatEvent(frame: SseFrame): string {
+  if (frame.comment) return `… ${frame.comment}`;
+  const label = TYPE_LABELS[frame.type ?? ""] ?? `事件：${frame.type ?? "raw"}`;
+  const data = (frame.data ?? {}) as {
+    text?: string;
+    score?: number | string;
+    passed?: boolean;
+    attempt?: number;
+    ok?: boolean;
+    name?: string;
+    stop_reason?: string;
+    result?: string;
+  };
+  switch (frame.type) {
+    case "evaluate.result":
+      return `${label}：score=${data.score}${data.passed ? "（通过）" : "（未过）"}`;
+    case "stage.generating":
+    case "stage.evaluating":
+      return data.attempt ? `${label}（第 ${data.attempt} 次）` : label;
+    case "agent.tool":
+      return `${label}：${data.name ?? ""} ${data.ok === false ? "（失败）" : ""}`.trim();
+    case "agent.done":
+      return `${label}（stop_reason=${data.stop_reason ?? "-"}）`;
+    case "stage.imaging":
+      return `${label}（来源：${(data as { source?: string }).source ?? "-"}）`;
+    case "approval.resumed":
+      return data.result === "rejected" ? "↻ 审批驳回，正在退回草稿…" : label;
+    default:
+      return label;
+  }
+}
+
+export default function StreamingDisplay({
+  productId,
+  reconnectDelayMs,
+  onTerminal,
+  onWaiting,
+  onDone,
+  height = 280,
+}: Props) {
+  const [text, setText] = useState("");
+  const [log, setLog] = useState<SseFrame[]>([]);
+  const [liveImages, setLiveImages] = useState<LiveImage[]>([]);
+  const [state, setState] = useState("连接中…");
+  const [fatal, setFatal] = useState<string | null>(null);
+  const [attemptSeed, setAttemptSeed] = useState(0); // 「重试」按钮：+1 触发重连
+  const boxRef = useRef<HTMLPreElement | null>(null);
+  const pinnedRef = useRef(true); // 用户没往上翻时自动滚到底
+  const callbacks = useRef({ onTerminal, onWaiting, onDone });
+  callbacks.current = { onTerminal, onWaiting, onDone };
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let waitingSignaled = false;
+
+    const handleFrame = (frame: SseFrame) => {
+      if (frame.comment) {
+        // 注释帧：空闲关流/读流异常由连接器的回调处理状态文案，这里只记一行备查
+        setLog((prev) => [...prev.slice(-199), frame]);
+        return;
+      }
+      if (frame.type === "content.chunk") {
+        const chunk = (frame.data ?? {}) as { text?: string };
+        if (chunk.text) setText((prev) => prev + chunk.text);
+        return;
+      }
+      if (frame.type === "image.ready") {
+        // AI 配图就绪：直接渲染在打字机文本下方（图片无法「打字机」流式）
+        const img = (frame.data ?? {}) as { url?: string; alt?: string };
+        if (img.url) {
+          setLiveImages((prev) => [...prev, { url: img.url as string, alt: img.alt }]);
+          setState("✔ AI 配图已就绪，正在写入…");
+        }
+        return;
+      }
+      setLog((prev) => [...prev.slice(-199), frame]);
+      if (frame.type === "hitl.waiting") {
+        // PA：这是**终态**（服务端随即关流，等待审批可能持续数小时）。
+        // 必须立刻脱离「生成中」并通知父级刷新商品状态；**不要**再等 approval.resumed
+        // （审批通过后由父级按需重开流，见 pages/ProductDetailPage 的说明）。
+        setState("✋ 已生成，等待人工审批中（可稍后刷新或到审批中心处理）");
+        if (!waitingSignaled) {
+          waitingSignaled = true;
+          callbacks.current.onWaiting?.();
+        }
+        return;
+      }
+      if (frame.type === "done") {
+        setState("生成完成");
+        callbacks.current.onDone?.();
+        return;
+      }
+      setState(`阶段：${frame.type ?? "raw"}`);
+    };
+
+    void connectProductStream({
+      productId,
+      signal: ctrl.signal,
+      retryDelayMs: reconnectDelayMs,
+      onFrame: handleFrame,
+      onIdle: () => setState("空闲（服务端已关流），自动续连中…"),
+      onTransientError: (reason) => setState(`连接中断：${reason}，自动重试中…`),
+      onReady: () => setState("（暂无进行中任务）"),
+      onTerminal: (type) => {
+        if (type === "hitl.waiting") setState("✋ 已生成，等待人工审批中");
+        else if (type === "done") setState("生成完成");
+        else if (type === "rejected") setState("已被驳回（商品已退回草稿）");
+        else setState("生成失败（商品已退回草稿，请查看轨迹后重试）");
+        callbacks.current.onTerminal?.(type);
+      },
+      onFatal: (reason) => {
+        setState(`连接失败：${reason}`);
+        setFatal(reason);
+        callbacks.current.onTerminal?.("failed");
+      },
+    });
+
+    return () => ctrl.abort();
+    // 角色/身份变化不影响流；attemptSeed 用于「重试」按钮强制重连
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, attemptSeed, reconnectDelayMs]);
+
+  useEffect(() => {
+    if (pinnedRef.current && boxRef.current) {
+      boxRef.current.scrollTop = boxRef.current.scrollHeight;
+    }
+  }, [text, log]);
+
+  const stageLines = log.map((frame) => formatEvent(frame)).filter((line) => line.length > 0).join("\n");
+  const hasBody = text.length > 0 || stageLines.length > 0;
+
+  return (
+    <div>
+      <Space style={{ marginBottom: 8 }} wrap>
+        <Typography.Text>
+          流式状态：<b>{state}</b>
+        </Typography.Text>
+        {fatal ? (
+          <Button
+            size="small"
+            onClick={() => {
+              setFatal(null);
+              setState("重新连接中…");
+              setAttemptSeed((n) => n + 1);
+            }}
+          >
+            重新连接
+          </Button>
+        ) : null}
+      </Space>
+      <pre
+        ref={boxRef}
+        onScroll={() => {
+          const el = boxRef.current;
+          if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+        style={{ height, overflow: "auto", background: "#fafafa", padding: 8, fontSize: 12, whiteSpace: "pre-wrap" }}
+      >
+        {hasBody ? `${text}${text && stageLines ? "\n" : ""}${stageLines}` : "暂无事件"}
+      </pre>
+      {liveImages.length > 0 ? (
+        <div style={{ marginTop: 8 }}>
+          {liveImages.map((img, i) => (
+            <img
+              key={`${img.url}-${i}`}
+              src={img.url}
+              alt={img.alt ?? "AI 配图"}
+              style={{
+                width: "100%",
+                maxWidth: 640,
+                height: "auto",
+                display: "block",
+                margin: "8px auto",
+                borderRadius: 8,
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+

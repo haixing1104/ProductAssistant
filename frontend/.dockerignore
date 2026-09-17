@@ -1,0 +1,11 @@
+# 构建上下文排除（镜像只需源码 + 锁文件；产物在镜像内构建）
+node_modules/
+dist/
+coverage/
+e2e/
+playwright-report/
+test-results/
+.env
+.env.*
+Dockerfile
+.dockerignore

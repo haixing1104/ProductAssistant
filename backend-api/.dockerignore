@@ -1,0 +1,9 @@
+# backend-api 构建上下文排除项（运行镜像只装 requirements.txt + src/）
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+README.md
+requirements-dev.txt
+pyproject.toml

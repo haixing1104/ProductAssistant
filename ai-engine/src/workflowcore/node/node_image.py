@@ -73,14 +73,34 @@ def _uploaded_image_urls(info: dict[str, Any]) -> list[str]:
     """从 raw_product_info 取运营上传图（products.raw_images 的 OSS 公有 URL 列表）。
 
     参数:
-        info: 商品素材 dict；读 raw_images（list[str]；防御性接受单个 URL 字符串）。
+        info: 商品素材 dict；读 raw_images。
     返回:
         过滤掉非字符串/空串后的 URL 列表；无上传图返回 []（调用方据此走 AI 生图分支）。
+    兼容形状（读侧宽容，写侧规范）:
+        · ``["https://…"]``          ← **规范形状**（backend 单写 list[str]）
+        · ``[{"url": "https://…"}]`` ← 早期 seed 数据 / 其它写入方（历史兼容）
+        · ``"https://…"``            ← 单值字符串（CSV / 手造数据）
+    注意:
+        规范形状不匹配时**绝不能静默丢弃**：丢图会改走 AI 生图分支，成本与产物都变了，
+        且日志上只表现为「生图成功」，属最难排查的一类降级。
     """
     raw = info.get("raw_images") or []
-    if isinstance(raw, str):  # 防御：CSV/手造数据可能给单 URL 字符串
+    if isinstance(raw, (str, dict)):  # 防御：CSV/手造数据可能给单值（字符串或 {"url":…}）
         raw = [raw]
-    return [u for u in raw if isinstance(u, str) and u]
+    urls: list[str] = []
+    for item in raw:
+        if isinstance(item, str):
+            if item:
+                urls.append(item)
+            continue
+        # 兼容 {"url": "https://…"} 形状（早期 seed 数据 / 其它写入方）。
+        # 规范形状是 list[str]（backend 单写 products.raw_images），此处做读侧兼容，
+        # 避免「上传图被静默过滤 → 静默改走 AI 生图」这类最难排查的降级。
+        if isinstance(item, dict):
+            url = item.get("url")
+            if isinstance(url, str) and url:
+                urls.append(url)
+    return urls
 
 
 def _image_block(*, url: str, alt: str, source: str, width: int | None, height: int | None) -> dict:

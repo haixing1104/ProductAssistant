@@ -1,0 +1,5 @@
+# backend-api 测试/开发依赖（运行依赖见 requirements.txt）
+# 依赖隔离红线：本模块与 ai-engine 各自独立 venv，严禁合并
+pytest>=8,<9
+# 异步用例（SQLAlchemy async + httpx ASGITransport 都是协程；asyncio_mode=auto 见 pyproject.toml）
+pytest-asyncio>=1.4,<2
