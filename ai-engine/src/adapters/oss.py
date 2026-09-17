@@ -30,6 +30,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from email.utils import formatdate
 
 from ..ports import ObjectStorageServer
 from . import llm_zhipu
@@ -41,6 +42,10 @@ _HTTP_TIMEOUT = 30.0
 
 # 预签名 URL 有效期（秒）：覆盖大图上传耗时；过期后 URL 失效，需重新签名。
 _PRESIGN_TTL_SECONDS = 3600
+
+# 启动自检（probe_oss_bucket）超时（秒）：比业务上传短得多 —— 自检只回 200/4xx，
+# 不该拖慢 worker 启动；慢就是坏（网络/DNS 问题），按不可用报出来。
+_PROBE_TIMEOUT = 5.0
 
 class OSSObjectStorageError(RuntimeError):
     """OSS 对象存储调用异常（HTTP / 网络 / 响应异常）。"""
@@ -115,6 +120,11 @@ class OSSObjectStorage(ObjectStorageServer):
     def _prefix(self) -> str:
         """受管对象前缀：上传图、AI 配图与删除白名单同源，均为 img/pa/（不含环境段）。"""
         return "img/pa/"
+
+    @property
+    def bucket_name(self) -> str:
+        """本实例实际使用（并由本实例签名）的 bucket 名；供启动自检/日志展示。"""
+        return self._bucket_name
 
     def _public_url(self, key: str) -> str:
         """对象公有读直链（bucket 需配置公共读），供 image block / 审批快照展示。
@@ -281,4 +291,58 @@ class OSSObjectStorage(ObjectStorageServer):
                 deleted += 1
         return deleted
 
-__all__ = ["OSSObjectStorage", "OSSObjectStorageError", "build_oss_storage_from_env"]
+def probe_oss_bucket(storage: OSSObjectStorage, *, timeout: float = _PROBE_TIMEOUT) -> tuple[bool, str]:
+    """启动自检：本 bucket 是否真的可用（只读 HEAD，不写任何对象、不建桶）。
+
+    为什么需要（2026-09 实测事故）:
+        `OSS_BUCKET` 指向一个**从未创建**的 bucket 时，`put_bytes` 每次都 404 NoSuchBucket，
+        而 node_image 会把原因吞进 State 的 `image_error`（只降级纯文本）→ 现象是
+        「页面永远没有配图」，日志里却看不到任何线索。启动时喊一声，把静默降级变成显性告警。
+
+    签名口径与 `_presign` 同源（SigV1 + `Date` 头），resource 取桶根 `/{bucket}/`；
+    HEAD 是无 body 的 HeadBucket 语义：200 = 存在且有权；403 = 存在但 AK 无权；
+    404 = 桶不存在（或 endpoint 地域与桶不符）。
+
+    参数:
+        storage: 已构建的 OSS 存储实例（携带 AK/SK/endpoint/bucket）。
+        timeout: 探针超时（秒）；默认 `_PROBE_TIMEOUT`（慢即视为不可用）。
+    返回:
+        (ok, detail)：ok=True 表示桶可用；detail 为可供人直接读的原因（失败时含排查线索）。
+        本函数**不抛异常** —— 自检永远不该让 worker 起不来。
+    """
+    bucket = storage.bucket_name
+    date = formatdate(usegmt=True)
+    resource = f"/{bucket}/"
+    string_to_sign = f"HEAD\n\n\n{date}\n{resource}"
+    digest = hmac.new(
+        storage._access_key_secret.encode("utf-8"),  # noqa: SLF001 同模块内的自检，复用签名材料
+        string_to_sign.encode("utf-8"),
+        hashlib.sha1,
+    ).digest()
+    auth = f"OSS {storage._access_key_id}:{base64.b64encode(digest).decode('utf-8')}"  # noqa: SLF001
+    req = urllib.request.Request(
+        f"https://{bucket}.{storage._endpoint}/",
+        method="HEAD",
+        headers={"Date": date, "Authorization": auth},
+    )
+    try:
+        with llm_zhipu._urlopen(req, timeout=timeout):
+            return True, f"bucket={bucket} 可用（HEAD 200）"
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False, (
+                f"bucket={bucket} 不存在（HTTP 404 NoSuchBucket）：请确认 OSS_BUCKET 是否已创建、"
+                f"AK 是否有权访问该桶、endpoint={storage._endpoint} 是否与桶地域一致"  # noqa: SLF001
+            )
+        if exc.code in (401, 403):
+            return False, (
+                f"bucket={bucket} 存在但当前 AK 无权限（HTTP {exc.code}）：检查 RAM 授权与桶读写策略"
+            )
+        return False, f"bucket={bucket} 探针返回 HTTP {exc.code}（既非可用也非缺失，请人工确认）"
+    except urllib.error.URLError as exc:
+        return False, f"bucket={bucket} 网络不可达：{exc.reason}"
+    except Exception as exc:  # noqa: BLE001 自检绝不冒泡：任何异常都降级为「不可用 + 原因」
+        return False, f"bucket={bucket} 探针异常：{type(exc).__name__}: {exc}"
+
+
+__all__ = ["OSSObjectStorage", "OSSObjectStorageError", "build_oss_storage_from_env", "probe_oss_bucket"]

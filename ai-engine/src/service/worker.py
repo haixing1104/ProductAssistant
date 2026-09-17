@@ -89,6 +89,29 @@ def _jsonify(value):
         return value.model_dump(mode="json")
     return value
 
+
+def image_outcome_line(thread_id: str, out: dict) -> str:
+    """把配图结果/降级原因渲染成一行进程日志（可观测性）。
+
+    为什么需要（2026-09 实测）:
+        `node_image` 失败只把原因写进 State 的 `image_error`（随后只落 checkpoint）；
+        `OSS_BUCKET` 指向不存在的桶时，每次生成都「生图成功、上传失败、静默降级纯文本」，
+        而日志里只有「开始生成 / 待处理读数」—— 前端表现为「永远没有配图」，后端表现为
+        「任务成功」，排障时完全无迹可循。这行日志就是那次的教训：**降级必须留痕**。
+
+    参数:
+        thread_id: 线程 ID（日志只取前 8 位，保持与其他行同口径）。
+        out: 图终态快照（invoke/resume 的返回；含 image_attached / image_error）。
+    返回:
+        单行日志文本：配图成功写 `image_attached=True`；降级写 `image_attached=False reason=…`。
+    """
+    short = str(thread_id or "")[:8]
+    error = out.get("image_error")
+    if error:
+        return f"[worker] 配图降级为纯文本 thread_id={short} image_attached=False reason={error}"
+    return f"[worker] 配图结果 thread_id={short} image_attached={out.get('image_attached')}"
+
+
 class ListingWorker:
     """一次取一条消息处理（消费组 worker 语义）。
     AI Engine 侧的 Redis Streams 消费组 worker，按“取一条消息 → 处理 → ack”的语义运行"""
@@ -544,6 +567,8 @@ class ListingWorker:
             }
             wf = self._workflow(rule_engine=engine)
             out = wf.invoke(input_state, config=wf.thread_config(data["thread_id"]))
+            # 配图结果（含降级原因）落进程日志：只写 State.image_error 的话排障时完全看不见
+            log(image_outcome_line(data["thread_id"], out))
             # 终态结果 → result:workflow：backend 据此把商品推为已上架 / 待审批
             interrupted = "__interrupt__" in out
             # 挂起时从图状态快照打包“审批内容快照”（完整文案+评估），随 awaiting_human 结果发送，
@@ -720,6 +745,8 @@ class ListingWorker:
             wf = self._workflow()
             decision = {"approved": data.get("result") == "approved", "feedback": data.get("feedback")}
             out = wf.resume(decision, config=wf.thread_config(data["thread_id"]))
+            # 配图结果（含降级原因）同样落日志：resume 路径也会重跑 image 节点（HITL 分支）
+            log(image_outcome_line(data["thread_id"], out))
             # 恢复终态：approved→（路由键 persist）save_content→published；rejected→reject_end→rejected（商品回 draft）
             if out.get("status") == "rejected":
                 # 终态事件契约：与 save_content 发 done 对齐，驳回也要给 SSE 一个终态，

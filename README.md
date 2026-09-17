@@ -993,6 +993,7 @@ GET /api/v1/products/{id}/stream?ticket=…    ← SSE：回放 + 尾随（无�
 ./scripts/dev-up.sh          # 前台：三路日志实时滚动（[backend] / [ai-engine] / [frontend]），Ctrl-C 一键收盘
 ./scripts/dev-up.sh --detach # 后台：日志落盘 /tmp/padev/*.log，用 ./scripts/dev-logs.sh 跟进
 ./scripts/dev-down.sh        # 停三进程（容器保留）；--with-infra 连容器一起停（数据卷保留）
+./scripts/test-frontend.sh   # 前端用例（自带超时与「以文件级 ✓ 判定」的收尾逻辑，见 frontend/README）
 ```
 
 脚本做的事（每一步都有可读输出，失败给出确切处置命令）：
@@ -1021,6 +1022,7 @@ grep -a 'POST /api/v1/products'      /tmp/padev/backend.log   # 触发生过生�
 grep -a '/stream?ticket'             /tmp/padev/backend.log   # SSE 连了几次（「生成后 0 次」= 前端没重连）
 grep -a 'result-consumer'            /tmp/padev/backend.log   # 结果是否被消费、商品被推进到什么状态
 grep -a 'request_id=<id>'            /tmp/padev/*.log         # 一次生成跨 backend/ai-engine/result 三段日志串起来
+grep -a '配图'                        /tmp/padev/ai-engine.log # 配图结果 / 降级原因（见下方「没有配图」条目）
 ```
 
 - 日志落盘 `${PAD_LOG_DIR:-/tmp/padev}/{backend,ai-engine,frontend}.log`，**每次启动把上一轮滚成 `.log.1`**
@@ -1030,6 +1032,17 @@ grep -a 'request_id=<id>'            /tmp/padev/*.log         # 一次生成跨 
 - `X-Request-Id` 由前端注入 → backend 写进 `job:generate` → ai-engine 与 result 消费器日志打印 → 全链路可 grep（见 backend README §2.2）；
 - **商品卡在「生成中」、按钮点不动**：自动兜底是 reaper（超期回收）+ 守卫宽容（再点一次生成即自愈）；
   要立刻处置去 `/ops` 面板「卡住任务」→ 终止（写审计）。完整 SOP 见 `backend-api/README.md` §六。
+- **详情页一直没有配图（任务却是 succeeded）**：配图失败一律降级纯文本（宁可无图也不丢已通过文案），
+  所以业务上「成功」不等于「有图」。两处显式留痕：
+  - **启动自检**（`service/__main__.py` → `adapters/oss.probe_oss_bucket`，只读 HEAD，不写对象/不建桶）：
+    `OSS_BUCKET` 指向不存在的桶时启动即打印
+    `⚠ 对象存储自检失败（配图与上传图转存将降级为纯文本）：bucket=… 不存在（HTTP 404 NoSuchBucket）…`；
+  - **每次生成一行结果**（`worker.image_outcome_line`）：
+    `[worker] 配图结果 thread_id=… image_attached=True` 或
+    `[worker] 配图降级为纯文本 thread_id=… image_attached=False reason=AI 配图失败…OSS put HTTP 404…`。
+  排查顺序：① 看这一行的 `reason`（生图 / 规格化 / OSS 上传三段其一）；② `NoSuchBucket` = 桶没建或桶名/地域不对
+    （2026-09 实测：`OSS_BUCKET` 配成了从未创建的桶 → 每次都静默降级）；③ `SignatureDoesNotMatch` = AK 与桶不匹配。
+
 
 #### 运行与测试
 

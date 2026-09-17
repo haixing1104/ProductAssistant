@@ -169,7 +169,7 @@ def main() -> None:
     from ..adapters.llm_image_cogview import build_image_cogview_gateway_from_env
     from ..adapters.llm_zhipu import build_zhipu_gateway_from_env
     from ..adapters.milvus_rag_store import build_milvus_rag_store_from_env
-    from ..adapters.oss import build_oss_storage_from_env
+    from ..adapters.oss import build_oss_storage_from_env, probe_oss_bucket
 
     # Agent 研究（默认开）：关闭时不装配（零成本短路）；启用但缺凭据 → 节点 no-op。
     # 启动提示是刻意的（可观测性）：默认开之后必须让人知道 Agent 在跑、预算多少、如何关。
@@ -187,6 +187,19 @@ def main() -> None:
             f"max_tool_calls={agent_max_tool_calls}）；如需关闭请设 AI_ENGINE_AGENT_ENABLED=0"
         )
 
+    # 对象存储自检（只读 HEAD，不写对象/不建桶）：OSS_BUCKET 指向不存在的桶时，
+    # 配图与上传图转存都会**静默降级**为纯文本（原因只落在图内 State）—— 现象是「页面永远没有配图」，
+    # 日志里却只有「生成成功」。2026-09 实测这里是最贵的一次排障，故启动即喊（不通过也照常启动）。
+    object_storage = build_oss_storage_from_env()
+    if object_storage is None:
+        log("[worker] 未配置对象存储（OSS_* 四项不全）→ 配图与上传图转存将降级为纯文本")
+    else:
+        storage_ok, storage_detail = probe_oss_bucket(object_storage)
+        if storage_ok:
+            log(f"[worker] 对象存储自检通过：{storage_detail}")
+        else:
+            log(f"[worker] ⚠ 对象存储自检失败（配图与上传图转存将降级为纯文本）：{storage_detail}")
+
     worker = ListingWorker(
         redis_client=client,
         keys=RedisKeys(env),
@@ -195,7 +208,7 @@ def main() -> None:
         llm_gateway=build_zhipu_gateway_from_env(),
         rag_store=build_milvus_rag_store_from_env(),
         image_gateway=build_image_cogview_gateway_from_env(),
-        object_storage=build_oss_storage_from_env(),
+        object_storage=object_storage,
         image_normalizer=build_image_normalizer_from_env(),
         rule_precheck=rule_precheck,
         agent_runtime=agent_runtime,
