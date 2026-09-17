@@ -78,7 +78,7 @@ class AIEngineClient:
         return self._redis
 
     # ------------------------------------------------------------------ 投递
-    def trigger_generation(self, *, thread_id: str, product_id: str, org_id: str, rules: dict) -> str:
+    def trigger_generation(self, *, thread_id: str, product_id: str, org_id: str, rules: dict, guidance: str | None = None) -> str:
         """投递生成任务（``rules`` 是**入队瞬间固化**的合规快照，见 ``rules_snapshot``）。
 
         返回:
@@ -87,6 +87,8 @@ class AIEngineClient:
             载荷带 ``request_id``（若调用方处于 HTTP 请求上下文）—— 一次生成要跨
             backend → Redis → ai-engine 三段日志，这个 ID 是唯一能把三段串起来的东西。
             取不到（后台任务/测试直调）就不带该字段（ai-engine 侧宽容读取）。
+            ``guidance``（可选）: 最近一次驳回意见，随任务下发，让下一轮生成**确定性地**
+            针对性改写（历史上该意见只落库、进不了提示词，见 repositories/approvals.py）。
         """
         request_id = _current_request_id()
         payload = {
@@ -95,6 +97,8 @@ class AIEngineClient:
             "org_id": str(org_id),
             "rules": rules,
         }
+        if guidance:
+            payload["guidance"] = guidance
         if request_id:
             payload["request_id"] = request_id
         return self._xadd(self._keys.job_generate(), payload)

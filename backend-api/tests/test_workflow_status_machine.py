@@ -43,6 +43,16 @@ def _job_status(backend_dsn: str, thread_id: str) -> str:
         ).fetchone()[0]
 
 
+def _job_error(backend_dsn: str, thread_id: str) -> str | None:
+    """读任务失败原因（商品详情页「最近一次任务失败原因」的数据源）。"""
+    import psycopg
+
+    with psycopg.connect(backend_dsn, autocommit=True) as conn:
+        return conn.execute(
+            "SELECT error FROM schema_pa_backend.generation_jobs WHERE thread_id = %s", (thread_id,)
+        ).fetchone()[0]
+
+
 def _count(backend_dsn: str, table: str, column: str, value: str) -> int:
     """统计行数（用于「不该建单/不该删行」这类反向断言）。"""
     import psycopg
@@ -124,6 +134,53 @@ async def test_rejected_and_failed_both_return_to_draft(
         )
         assert _product_row(backend_dsn, seeded_org.product_id) == ("draft", None)
         assert _job_status(backend_dsn, thread_id) == "failed"
+
+
+# ------------------------------------------------------------ 失败原因回传（可观测性）
+
+
+async def test_failed_result_carries_error_into_job(
+    app, settings, backend_dsn: str, seeded_org: SeededOrg
+) -> None:
+    """``failed`` 结果里的 ``error`` 必须落进 ``generation_jobs.error``。
+
+    为什么重要（2026-09 实测）: 商品详情页读的是 ``products_router.active_job_error =
+    job.error``，而消费器原先从不写该列 —— 任何失败（合规拦截 / LLM 异常）在界面上
+    都表现为「商品莫名回到 draft」，根因完全不可见（与「配图静默降级」同类缺陷）。
+    """
+    thread_id = seed_job(backend_dsn, org_id=seeded_org.org_id, product_id=seeded_org.product_id)
+    reason = "input_compliance_blocked(商品标题): 命中违禁词「最便宜」（广告法种子）"
+    await _consumer(app, settings).process_payload(
+        result_payload(
+            thread_id=thread_id,
+            product_id=seeded_org.product_id,
+            org_id=seeded_org.org_id,
+            result="failed",
+            error=reason,
+        )
+    )
+    assert _job_error(backend_dsn, thread_id) == reason
+
+
+async def test_published_result_clears_stale_error(
+    app, settings, backend_dsn: str, seeded_org: SeededOrg
+) -> None:
+    """成功终态清空历史失败原因：否则「上一次失败原因」会永久挂在已恢复的商品上。"""
+    thread_id = seed_job(backend_dsn, org_id=seeded_org.org_id, product_id=seeded_org.product_id)
+    _exec(
+        backend_dsn,
+        "UPDATE schema_pa_backend.generation_jobs SET error = '旧失败原因' WHERE thread_id = %s",
+        (thread_id,),
+    )
+    await _consumer(app, settings).process_payload(
+        result_payload(
+            thread_id=thread_id,
+            product_id=seeded_org.product_id,
+            org_id=seeded_org.org_id,
+            result="published",
+        )
+    )
+    assert _job_error(backend_dsn, thread_id) is None
 
 
 # ------------------------------------------------------------ 五条加固

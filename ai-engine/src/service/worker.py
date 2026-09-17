@@ -540,7 +540,10 @@ class ListingWorker:
                 ]
                 if blocked:
                     reasons = [h.reason or h.keyword for h in blocked]
-                    log(f"[worker] 输入素材命中违禁词，阻止生成 thread_id={str(data['thread_id'])[:8]}: {reasons}")
+                    log(
+                        f"[worker] 输入素材命中违禁词，阻止生成 thread_id={str(data['thread_id'])[:8]}"
+                        f"（字段=商品标题）: {reasons}"
+                    )
                     self._publish(
                         data["thread_id"],
                         {
@@ -553,7 +556,13 @@ class ListingWorker:
                             },
                         },
                     )
-                    self._publish_outcome(data, "failed")
+                    # 原因随结果回传 → backend 写 generation_jobs.error → 详情页「最近一次任务失败原因」
+                    # 直接显示「标题命中违禁词「最便宜」」。不回传的话，操作者只看到商品莫名回到 draft。
+                    self._publish_outcome(
+                        data,
+                        "failed",
+                        error=f"input_compliance_blocked(商品标题): {'；'.join(reasons)}",
+                    )
                     return "blocked_input"
             self._publish(
                 data["thread_id"],
@@ -564,6 +573,9 @@ class ListingWorker:
                 "product_id": data["product_id"],
                 "org_id": data["org_id"],
                 "raw_product_info": product,
+                # 最近一次驳回意见（可选）：backend 在触发时查 hitl_approvals 下发，
+                # 让"按意见重写"成为确定性行为（而非依赖 Agent 主动去查历史审批）
+                "reject_guidance": data.get("guidance") or "",
             }
             wf = self._workflow(rule_engine=engine)
             out = wf.invoke(input_state, config=wf.thread_config(data["thread_id"]))
@@ -743,6 +755,16 @@ class ListingWorker:
                 },
             )
             wf = self._workflow()
+            # 守卫：线程必须已有 checkpoint。脏审批单（库被重置 / 手工造的数据）指向的线程
+            # 在图上并不存在 —— 直接 resume 会以"空 State"重跑一遍图，节点发事件时 thread_id
+            # 为空抛 ValueError('evt:')，现场极难理解（2026-09 实测）。这里显式判定并给出可读原因。
+            if hasattr(wf, "has_checkpoint") and not wf.has_checkpoint(data["thread_id"]):
+                self._terminalize_failed(
+                    data,
+                    RuntimeError("线程不存在或已被清理（无 checkpoint）：拒绝 resume 以免空 State 重跑"),
+                    stage="approval",
+                )
+                return "failed"
             decision = {"approved": data.get("result") == "approved", "feedback": data.get("feedback")}
             out = wf.resume(decision, config=wf.thread_config(data["thread_id"]))
             # 配图结果（含降级原因）同样落日志：resume 路径也会重跑 image 节点（HITL 分支）
@@ -798,7 +820,11 @@ class ListingWorker:
             log(f"[worker] 发布 failed 事件失败: {pub_exc!r}")
         try:
             if data.get("product_id") and data.get("org_id"):
-                self._publish_outcome(data, "failed")
+                self._publish_outcome(
+                    data,
+                    "failed",
+                    error=f"{stage}: {type(exc).__name__}: {exc}",
+                )
         except Exception as pub_exc:  # noqa: BLE001
             log(f"[worker] 发布 failed 结果失败: {pub_exc!r}")
 
@@ -820,7 +846,9 @@ class ListingWorker:
         # 每次发布都刷新 TTL：长任务的早中期事件不会因为「总时长 > TTL」而中途被整流回收
         self.streams.expire(stream, self.evt_ttl_seconds)
 
-    def _publish_outcome(self, data: dict, result: str, *, content_snapshot: dict | None = None) -> None:
+    def _publish_outcome(
+        self, data: dict, result: str, *, content_snapshot: dict | None = None, error: str | None = None
+    ) -> None:
         """图终态结果发布到 result:workflow（backend WorkflowResultConsumer 消费推进商品状态机）。
 
         只读 Redis 无 DB 写入，“ai-engine 不写 schema_pa_backend”；幂等：终态只执行一次。
@@ -831,6 +859,12 @@ class ListingWorker:
             data: 原始任务载荷；取 thread_id / product_id / org_id 作为结果三要素。
             result: 终态标识（published / awaiting_human / rejected / failed）。
             content_snapshot: 仅 awaiting_human 时携带的“待审文案+评估依据”快照；其余终态为 None。
+            error: 仅 failed 时携带的失败原因（合规拦截 / 异常摘要）；published 等成功终态不传。
+                为什么需要它（2026-09 实测）: 消费器只按 result 推进状态机，从不写 ``job.error``，
+                而商品详情页的「最近一次任务失败原因」读的正是这个字段 —— 不回传原因时，
+                失败在界面上表现为「商品莫名回到 draft」，合规拦截尤其看不见（等于静默降级）。
+        _字段契约_:
+            ``error`` 由 backend 消费器截断后写入 ``generation_jobs.error``；长度上限 1000 字符。
         注意:
             只读 Redis、无 DB 写入（ai-engine 不写 schema_pa_backend）；
             终态只应发布一次（调用方保证路径唯一）。
@@ -843,6 +877,9 @@ class ListingWorker:
         }
         if content_snapshot is not None:
             fields["content_snapshot"] = content_snapshot
+        if error:
+            # 失败原因随结果回传（截断保护：异常消息可能很长）→ backend 写 generation_jobs.error
+            fields["error"] = str(error)[:1000]
         # 回传 backend 的请求关联 ID（可选字段）：backend 侧消费日志据此与「触发那次生成」的
         # HTTP 请求对齐 —— 一次生成跨三段日志（backend → Redis → ai-engine），这是唯一的串接手段
         request_id = data.get("request_id")

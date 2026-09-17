@@ -31,13 +31,15 @@ from typing import Any, Literal
 # 严重级：high=红线（阻断）/ medium=阻断但可容忍 / low=仅参考（不阻断）。
 Severity = Literal["high", "medium", "low"]
 
-# 阻断级：命中即 fail-fast（跳过 LLM 评估直接判不通过）。low 不否决，仅作参考
-# （一期 seed 全为 high；规则数据出现 low 后再补「喂 LLM 复核」路径，见 PROGRESS）。
+# 阻断级：命中即 fail-fast（跳过 LLM 评估直接判不通过）。low 不否决，但要"有影响、有痕迹"
+# ——被喂进 LLM 复核，并按 SEVERITY_PENALTY 扣分、写入 violations（见 node_evaluate）。
 BLOCKING_SEVERITIES = frozenset({"high", "medium"})
 
-# 规则单独裁决（fail-fast）时的确定性扣分制（score 语义：max(0, 100 - Σ罚分)）。
-# 注意：low 记 0 罚分（不否决）；未知 severity 同样记 0 罚分，不抛异常。
-SEVERITY_PENALTY: dict[Severity, float] = {"high": 40.0, "medium": 20.0, "low": 0.0}
+# 扣分制（score 语义：max(0, 100 - Σ罚分)）。
+# low 罚 5 分：**不否决**，但必须有可见影响 —— 历史实现里 low 记 0 罚分且被 evaluate 直接丢弃，
+# 结果是"管理员配了低危词，命中后什么都没发生"（配置形同虚设）。未知 severity 仍记 0 罚分，
+# 不抛异常，保证规则数据异常不阻断打分链路。
+SEVERITY_PENALTY: dict[Severity, float] = {"high": 40.0, "medium": 20.0, "low": 5.0}
 
 
 @dataclass(frozen=True)
@@ -56,12 +58,20 @@ class RuleHit:
     reason: str  # 命中原因/修改建议（优先 compliance_rules.suggestion）
 
     def to_violation(self) -> dict[str, Any]:
-        """转为 evaluation_result.violations 条目（schemas.EvalViolation 契约，含 rule_id）。
+        """转为 evaluation_result.violations 条目（schemas.EvalViolation 契约）。
 
         返回:
-            {"keyword": ..., "reason": ..., "rule_id": ...} 三元组字典。
+            {"keyword": ..., "reason": ..., "rule_id": ..., "severity": ...} 四元组字典。
+        注意:
+            severity 一并透出（low 也要能在审批中心看见"这是提示级命中"），
+            与 schemas.EvalViolation.severity 的可选字段对齐。
         """
-        return {"keyword": self.keyword, "reason": self.reason, "rule_id": self.rule_id}
+        return {
+            "keyword": self.keyword,
+            "reason": self.reason,
+            "rule_id": self.rule_id,
+            "severity": self.severity,
+        }
 
 
 def rule_score(hits: list[RuleHit]) -> float:

@@ -188,3 +188,65 @@ describe("detailRefetchInterval（流断了也能复位的兜底轮询）", () =
     expect(detailRefetchInterval(undefined)).toBe(false);
   });
 });
+describe("ProductDetailPage（审批与驳回复盘：必须能看到已定案单）", () => {
+  beforeEach(() => {
+    connectSpy.mockClear();
+    mockProducts.get.mockResolvedValue(product());
+    vi.mocked(contentsApi.list).mockResolvedValue([]);
+    vi.mocked(evaluationLogsApi.list).mockResolvedValue([]);
+    useAuthStore.setState({ token: "t", user: { id: "u-1", role: "operator" } });
+  });
+
+  afterEach(() => {
+    queryClient?.clear();
+    queryClient = null;
+    useAuthStore.getState().clear();
+  });
+
+  it("复盘查询显式带 status=all（否则已定案的驳回单会被 backend 缺省 pending 过滤掉）", async () => {
+    vi.mocked(approvalsApi.list).mockResolvedValue({ items: [], total: 0 } as never);
+    renderPage();
+
+    await waitFor(() => expect(vi.mocked(approvalsApi.list)).toHaveBeenCalled());
+    expect(vi.mocked(approvalsApi.list).mock.calls.at(-1)?.[0]).toMatchObject({
+      productId: PRODUCT_ID,
+      status: "all",
+      withSnapshot: true,
+    });
+  });
+
+  it("已驳回的单会渲染出审批意见与被驳回的图文快照", async () => {
+    vi.mocked(approvalsApi.list).mockResolvedValue({
+      items: [
+        {
+          id: "a-1",
+          org_id: "o-1",
+          product_id: PRODUCT_ID,
+          thread_id: "t-1",
+          status: "rejected",
+          channel: "web",
+          feedback: "配图不符，请重做",
+          resolved_at: "2026-09-17T20:42:18+08:00",
+          content_snapshot: {
+            reason: "high_value",
+            content: {
+              blocks: [
+                { type: "text", text: "被驳回的文案正文" },
+                { type: "image", url: "https://oss.example/img.jpg", alt: "AI 配图", source: "ai_generated" },
+              ],
+            },
+            evaluation_result: { passed: true, score: 95 },
+            evaluation_attempts: 1,
+          },
+        },
+      ],
+      total: 1,
+    } as never);
+    renderPage();
+
+    expect(await screen.findByText("被驳回的文案正文")).toBeInTheDocument();
+    expect(screen.getByText("审批意见：配图不符，请重做")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "AI 配图" })).toBeInTheDocument();
+  });
+});
+

@@ -5,6 +5,9 @@
 
 命中携带 rule_id 落 evaluation_logs（evaluator_type='rule'，拦截有据可查）。
 
+低危（low）命中**不否决**，但不得"无影响、无痕迹"（2026-09 修）：
+参与扣分（SEVERITY_PENALTY.low）、写入 violations（带 severity，审批人可见）、并喂给 LLM 复核。
+
 无规则引擎时以 LLM 兜底路径覆盖。
 
 结构化输出强约束（schemas.EvalOutput）：LLM 返回必须通过 pydantic 校验
@@ -18,25 +21,40 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ...ports import BLOCKING_SEVERITIES, EvalLogStore, EvalRecord, LLMGateway, RuleEngine, rule_score
-from ..state import EvalOutput, EVALUATION_SCHEMA_DESC, eval_output_json_schema
-from ..state import ListingState, ensure_state
+from ...ports import (
+    BLOCKING_SEVERITIES,
+    SEVERITY_PENALTY,
+    EvalLogStore,
+    EvalRecord,
+    LLMGateway,
+    RuleEngine,
+    rule_score,
+)
+from ..state import EVALUATION_SCHEMA_DESC, EvalOutput, EvalViolation, ListingState, ensure_state
+from ..state import eval_output_json_schema
 
 # 结构修复（schema 不通过时把校验错误回喂 LLM 重出）上限：不占用 Reflection 重试预算
 MAX_SCHEMA_REPAIRS = 2
 
-def _build_eval_prompt(content: str, info: dict[str, Any]) -> str:
+def _build_eval_prompt(content: str, info: dict[str, Any], soft_hits: list | None = None) -> str:
     """构造评估提示词：事实基线 + 待评估文案 + 强 schema 说明与合法示例。
 
     参数:
         content: 待评估文案（通常是 generated_content 全文）。
         info: 商品素材 dict，作为事实核验基线（供 LLM 对照价格/卖点等）。
+        soft_hits: 规则层已命中的低危（low）点；传入时要求 LLM 一并在 violations 中复核
+            （"低危不等于无影响"——LLM 可结合上下文判定它是否真的可接受）。
     返回:
         评估提示词字符串。
     """
+    soft_hint = ""
+    if soft_hits:
+        joined = "；".join(f"{hit.keyword}（{hit.reason}）" for hit in soft_hits)
+        soft_hint = f"已知低危（提示级）命中点，请在 violations 中一并复核其可接受性：{joined}\n"
     return (
         f"你是电商合规与事实一致性评估器。事实基线(供核验): {info}\n"
         f"待评估文案:\n{content}\n"
+        f"{soft_hint}"
         f"请返回 JSON（key 必须齐全，不要输出其它字段）: {EVALUATION_SCHEMA_DESC}\n"
         f"合法示例：{{\"passed\": true, \"score\": 88.0, \"violations\": [], "
         f"\"facts_checked\": [{{\"fact\": \"价格与素材一致\", \"consistent\": true}}]}}"
@@ -94,6 +112,34 @@ def _request_strict_eval(gateway: LLMGateway, prompt: str) -> tuple[EvalOutput |
     return None, errors
 
 
+def _apply_soft_hits(
+    result: EvalOutput, soft_hits: list, errors: list[str]
+) -> tuple[EvalOutput, list[str]]:
+    """把「低危（low）命中」并入评估结果：**不否决**，但扣分、进 violations、进 errors。
+
+    为什么需要（2026-09）: 此前 low 命中在 evaluate 里被静默丢弃 —— 既不进 violations 也不扣分，
+    管理员配的低危词命中后"什么都没发生"（配置形同虚设，审批人也看不到任何痕迹）。
+    本函数保持"不否决"语义（不改写 passed），只让命中可见、可计分、可复核。
+
+    参数:
+        result: 已产生的评估结果（LLM 路径 / 骨架路径 / 规则路径的产物）。
+        soft_hits: 非阻断级命中（RuleHit 列表，通常为 low）。
+        errors: 当前已汇总的原因列表。
+    返回:
+        (新的 EvalOutput, 新的 errors)；``soft_hits`` 为空时原样返回（零开销、历史行为不变）。
+    """
+    if not soft_hits:
+        return result, errors
+    penalty = sum(SEVERITY_PENALTY.get(hit.severity, 0.0) for hit in soft_hits)
+    # 必须构造 EvalViolation 实例（不是裸 dict）：否则 EvalOutput.errors 等按属性访问的
+    # 下游（reflection 提示词、日志摘要）会在 dict 上取 .reason 直接炸，且 model_dump 会告警。
+    merged = [*result.violations, *[EvalViolation(**hit.to_violation()) for hit in soft_hits]]
+    return (
+        result.model_copy(update={"score": max(0.0, result.score - penalty), "violations": merged}),
+        [*errors, *[hit.reason or hit.keyword for hit in soft_hits]],
+    )
+
+
 def evaluate_listing_node(
     state: ListingState,
     gateway: LLMGateway | None = None,
@@ -138,22 +184,22 @@ def evaluate_listing_node(
             {"type": "stage.evaluating", "data": {"attempt": attempts, "product_id": state.product_id}},
         )
 
-    # ---- 规则先行：阻断级命中 → fail-fast，不调用 LLM ----
-    blocking_hits = (
-        [h for h in rule_engine.check(content) if h.severity in BLOCKING_SEVERITIES]
-        if rule_engine is not None and content
-        else []
-    )
+    # ---- 规则先行：阻断级命中 → fail-fast，不调用 LLM；低危命中不否决但必须留痕 ----
+    rule_hits = rule_engine.check(content) if (rule_engine is not None and content) else []
+    blocking_hits = [h for h in rule_hits if h.severity in BLOCKING_SEVERITIES]
+    # low（提示级）：不否决 —— 但参与扣分、写进 violations（审批人可见）、并被喂给 LLM 复核
+    soft_hits = [h for h in rule_hits if h.severity not in BLOCKING_SEVERITIES]
 
     if blocking_hits:
         # 规则单独裁决：确定性扣分制分数 + violations 携带 rule_id（拦截有据可查）
+        scored = [*blocking_hits, *soft_hits]  # 低危命中同样参与扣分与展示
         result = EvalOutput(
             passed=False,
-            score=rule_score(blocking_hits),
-            violations=[h.to_violation() for h in blocking_hits],
+            score=rule_score(scored),
+            violations=[h.to_violation() for h in scored],
             facts_checked=[],
         )
-        errors: list[str] = [h.reason or h.keyword for h in blocking_hits]
+        errors: list[str] = [h.reason or h.keyword for h in scored]
         eval_type = "rule"
         rule_id = blocking_hits[0].rule_id
     elif gateway is None:
@@ -162,9 +208,10 @@ def evaluate_listing_node(
         errors = []
         eval_type = "llm"
         rule_id = None
+        result, errors = _apply_soft_hits(result, soft_hits, errors)
     else:
         # ---- LLM Evaluator 语义兜底（schemas 强约束 + 结构修复 + 安全降级） ----
-        model, errors = _request_strict_eval(gateway, _build_eval_prompt(content, info))
+        model, errors = _request_strict_eval(gateway, _build_eval_prompt(content, info, soft_hits))
         eval_type = "llm"
         rule_id = None
         if model is None:
@@ -174,6 +221,8 @@ def evaluate_listing_node(
             # violations 一票否决：LLM 声称通过但带违规点 → 业务层按 False 落账
             result = model.model_copy(update={"passed": False}) if model.violations else model
             errors = model.errors or errors  # 反思/日志优先用违规原因
+        # 低危命中：扣分 + 并入 violations/errors（不否决 passed）
+        result, errors = _apply_soft_hits(result, soft_hits, errors)
 
 
 

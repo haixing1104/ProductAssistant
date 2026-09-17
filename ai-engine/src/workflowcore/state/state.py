@@ -35,6 +35,10 @@ class ListingState(BaseModel):
     raw_product_info: dict[str, Any] = Field(default_factory=dict)
     # RAG 召回的历史高转化文案（Few-Shot 上下文）
     rag_context: str = ""
+    # 最近一次人工审批驳回意见（backend 随 job 载荷 `guidance` 下发）。
+    # 为什么进 State（2026-09）: 该意见历史上只落 hitl_approvals.feedback，进不了提示词 ——
+    # 于是"驳回后重新生成"实质只是重跑一次，审批人的意见大概率白写。
+    reject_guidance: str = ""
     # Agent 研究结论（只读工具取证后的要点；node_agent 产出、node_generate 消费）
     agent_context: str = ""
     # Agent 调用轨迹（逐轮模型/工具记录，JSON 安全；供审计与排障，不参与落库）

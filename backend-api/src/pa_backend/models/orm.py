@@ -24,7 +24,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, Text, Uuid, text
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Text, Uuid, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -229,6 +229,56 @@ class JobAbortAudit(Base):
     actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     reason: Mapped[str] = mapped_column(Text)
     aborted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class ApprovalRedriveAudit(Base):
+    """审批补投审计（``0006_approval_audits.sql``）。
+
+    权限：``role_pa_backend`` 仅 **SELECT/INSERT**（0006 显式 REVOKE UPDATE/DELETE）。
+
+    存在的理由（2026-09 实测）：补投按钮此前**没有任何痕迹** —— 点了之后既看不到"投了几次、
+    结果如何"，也分不清"引擎已收到（无需补投）"与"投出去了但没消费"。本表让每次动作可审计。
+    """
+
+    __tablename__ = "approval_redrive_audits"
+    __table_args__ = {"schema": SCHEMA_BACKEND}
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    approval_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    thread_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    #: enqueued / not_needed / throttled / enqueue_failed（见 approval_service.redrive）
+    outcome: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    redriven_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class ApprovalOverride(Base):
+    """人工放行「带评估命中点」的审计（``0006_approval_audits.sql``）。
+
+    权限：``role_pa_backend`` 仅 **SELECT/INSERT**（0006 显式 REVOKE UPDATE/DELETE）。
+
+    存在的理由（2026-09 实测）：合规命中 + 转人工后，审批人一点「批准」就能上架，
+    既没有强制说明、也没有留痕 —— 出了合规问题无法回答"谁在知情下放行的"。
+    本表记录放行时的命中点快照与理由。
+    """
+
+    __tablename__ = "approval_overrides"
+    __table_args__ = {"schema": SCHEMA_BACKEND}
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    approval_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    thread_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    violation_count: Mapped[int] = mapped_column(Integer)
+    #: 命中点快照（evaluation_result.violations；JSONB，便于回查"当时到底命中了什么"）
+    violations: Mapped[list] = mapped_column(JSONB, default=list)
+    reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
 

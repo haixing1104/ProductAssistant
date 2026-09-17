@@ -365,6 +365,7 @@ def result_payload(
     org_id: str,
     result: str,
     content_snapshot: dict | None = None,
+    error: str | None = None,
 ) -> dict:
     """构造一条 ``result:workflow`` 载荷（与 ai-engine ``_publish_outcome`` 字段一致）。"""
     payload: dict = {
@@ -376,5 +377,8 @@ def result_payload(
     }
     if content_snapshot is not None:
         payload["content_snapshot"] = content_snapshot
+    if error is not None:
+        # failed 终态的原因回传（合规拦截 / 异常摘要）：消费器写入 generation_jobs.error
+        payload["error"] = error
     return payload
 

@@ -101,9 +101,13 @@ def test_empty_text_returns_no_hits():
 
 
 def test_score_and_blocking_thresholds():
-    """分数口径：high 扣 40、medium 扣 20、low 扣 0，下限 0；high/medium 视为阻断。"""
-    hits = _matcher().check("最便宜啊最好100%")  # medium(20) + low(0) + low(0)
-    assert rule_score(hits) == 80.0
+    """分数口径：high 扣 40、medium 扣 20、low 扣 5，下限 0；high/medium 视为阻断。
+
+    low 从 0 改为 5（2026-09）: 低危词原先"命中后既不扣分也不可见"，等于管理员配了没用；
+    现在它不阻断、但必须留下可见影响（ai-engine 侧同步把 low 计入分数与 violations）。
+    """
+    hits = _matcher().check("最便宜啊最好100%")  # medium(20) + low(5) + low(5)
+    assert rule_score(hits) == 70.0
     assert is_blocking("high") and is_blocking("medium") and not is_blocking("low")
     assert BLOCKING_SEVERITIES == {"high", "medium"}
     heavy = _matcher().check("最便宜啊" + "第一" * 5)  # high×5 + medium×1 → 下限 0

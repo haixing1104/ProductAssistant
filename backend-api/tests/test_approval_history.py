@@ -102,6 +102,61 @@ async def test_history_filters_by_product_id(
         _exec(backend_dsn, "DELETE FROM schema_pa_backend.products WHERE id = %s", (other_product_id,))
 
 
+async def test_status_all_returns_decided_approval_for_product(
+    client: AsyncClient, auth_headers: dict, backend_dsn: str, seeded_org: SeededOrg
+):
+    """``status=all`` + ``product_id``：复盘必须看到**已定案**的单（2026-09 事故回归点）。
+
+    事故现场：商品详情页的「审批与驳回复盘」只传 ``product_id``（+ with_snapshot），
+    而 backend 缺省语义是 ``status=pending`` → 驳回单永远查不到，界面恒显示
+    「该商品还没有审批记录」，于是「驳回后详情页看不到被驳回的图文」。
+    这里锁住两件事：``all`` 能取到已定案单且带完整快照；缺省行为**保持不变**。
+    """
+    _thread, approval_id = _seed_pending_approval(
+        backend_dsn, org_id=seeded_org.org_id, product_id=seeded_org.product_id
+    )
+    rejected = await client.post(
+        f"{APPROVALS_URL}/{approval_id}/reject",
+        json={"feedback": "配图不符，请重做"},
+        headers=auth_headers,
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    # 复盘卡的真实请求形状：product_id + status=all + with_snapshot
+    replay = await client.get(
+        APPROVALS_URL,
+        params={
+            "product_id": seeded_org.product_id,
+            "status": "all",
+            "with_snapshot": "true",
+            "limit": 20,
+        },
+        headers=auth_headers,
+    )
+    assert replay.status_code == 200, replay.text
+    items = {item["id"]: item for item in replay.json()["data"]}
+    assert approval_id in items, "已定案单必须出现在「全部状态」的回盘里"
+    assert items[approval_id]["status"] == "rejected"
+    assert items[approval_id]["feedback"] == "配图不符，请重做"
+    assert items[approval_id]["content_snapshot"] is not None, "复盘要能看到被驳回的图文快照"
+
+    # 兼容约定不变：缺省（不传 status）仍是 pending → 查不到这张已定案单
+    default_list = await client.get(
+        APPROVALS_URL, params={"product_id": seeded_org.product_id}, headers=auth_headers
+    )
+    assert approval_id not in {item["id"] for item in default_list.json()["data"]}
+
+
+async def test_status_all_accepted_while_empty_status_still_400(client: AsyncClient, auth_headers: dict):
+    """``all`` 是合法过滤值；空串仍是 400（"不传=全部"这种歧义必须被拒绝）。"""
+    ok_resp = await client.get(APPROVALS_URL, params={"status": "all", "limit": 1}, headers=auth_headers)
+    assert ok_resp.status_code == 200, ok_resp.text
+
+    empty = await client.get(APPROVALS_URL, params={"status": "", "limit": 1}, headers=auth_headers)
+    assert empty.status_code == 400
+    assert "all" in empty.json()["message"]
+
+
 async def test_pending_alias_matches_default_list(client: AsyncClient, auth_headers: dict):
     """默认行为不变：不传 ``status`` ≡ ``status=pending`` ≡ ``/approvals/pending``。"""
     default_list = await client.get(APPROVALS_URL, params={"limit": 200}, headers=auth_headers)

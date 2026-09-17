@@ -28,6 +28,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from "antd";
@@ -51,6 +52,38 @@ import { canWriteProducts, useAuthStore } from "../store/authStore";
 import type { Approval, ContentVersion, Product } from "../types/api";
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+/**
+ * 查询失败提示（可重试）。
+ *
+ * 为什么必须有（2026-09 实测）: 详情页此前只处理「商品」这一路查询的错误，
+ * 内容版本 / 思考轨迹 / 审批复盘三路查询一旦失败（403/500/网络）会被静默当成"没有数据"，
+ * 渲染成 Empty 文案 —— 「驳回后看不到内容」的观感一半来自这里：用户看到的是"没有记录"，
+ * 而真相是"接口没取到"。
+ */
+function QueryError({
+  title,
+  error,
+  onRetry,
+}: {
+  title: string;
+  error: unknown;
+  onRetry: () => void;
+}) {
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      message={title}
+      description={apiErrorMessage(error, "加载失败，请重试")}
+      action={
+        <Button size="small" onClick={onRetry}>
+          重试
+        </Button>
+      }
+    />
+  );
+}
 
 /**
  * 详情查询的兜底轮询策略（导出便于单测，与 ``pages/OpsPage.heartbeatMeta`` 同一做法）。
@@ -104,10 +137,14 @@ export default function ProductDetailPage() {
     queryFn: () => evaluationLogsApi.list(productId),
     enabled: productId.length > 0,
   });
-  // 审批与驳回复盘：按 product_id 查历史（含已定案单；带完整快照）
+  // 审批与驳回复盘：按 product_id 查历史（**必须显式 status=all**；带完整快照）
+  // 历史事故（2026-09）：这里只传 product_id + with_snapshot，而 backend 的缺省语义是
+  // status=pending → 已定案（批准/驳回）的单永远查不到 → 卡片恒显示「还没有审批记录」，
+  // 「驳回后看不到被驳回的图文」正是这么来的。契约见 backend README §2.6。
   const approvals = useQuery({
     queryKey: ["approvals", "product", productId],
-    queryFn: () => approvalsApi.list({ productId, withSnapshot: true, limit: 20 }),
+    queryFn: () =>
+      approvalsApi.list({ productId, status: "all", withSnapshot: true, limit: 20 }),
     enabled: productId.length > 0,
   });
 
@@ -192,6 +229,8 @@ export default function ProductDetailPage() {
   const trace = traceRows(traces.data ?? []);
   const approvalItems: Approval[] = approvals.data?.items ?? [];
   const canGenerate = writable && product.status !== "generating" && product.status !== "waiting_approval";
+  // 最近一次驳回（复盘卡用它渲染「按该意见重新生成」；意见由 backend 随新任务注入下一轮生成）
+  const lastRejected = approvalItems.find((item) => item.status === "rejected") ?? null;
 
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
@@ -274,6 +313,25 @@ export default function ProductDetailPage() {
         )}
       </Card>
 
+      {/* 三路查询的错误必须显式可见（否则接口失败会被当成"没有数据"，见 QueryError 注释） */}
+      {contents.isError ? (
+        <QueryError
+          title="已保存内容加载失败"
+          error={contents.error}
+          onRetry={() => void contents.refetch()}
+        />
+      ) : null}
+      {traces.isError ? (
+        <QueryError title="AI 思考轨迹加载失败" error={traces.error} onRetry={() => void traces.refetch()} />
+      ) : null}
+      {approvals.isError ? (
+        <QueryError
+          title="审批与驳回复盘加载失败"
+          error={approvals.error}
+          onRetry={() => void approvals.refetch()}
+        />
+      ) : null}
+
       {streamOn ? (
         <Card
           title="AI 实时生成"
@@ -298,8 +356,29 @@ export default function ProductDetailPage() {
         </Card>
       ) : null}
 
-      {/* 审批与驳回复盘：PA 用「按产品查审批历史」替代 PP 的 last_reject_* 冗余列 */}
-      <Card title="审批与驳回复盘" extra={<Link to="/approvals">去审批中心</Link>}>
+      {/* 审批与驳回复盘：PA 用「按产品查审批历史」替代 PP 的 last_reject_* 冗余列。
+          必须带 status=all —— 缺省 pending 会让已定案（驳回/批准）的单查不到。 */}
+      <Card
+        title="审批与驳回复盘"
+        extra={
+          <Space>
+            {lastRejected && writable ? (
+              <Tooltip title="驳回意见会由 backend 随新任务注入下一轮生成（AI 需逐条解决）">
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={generate.isPending}
+                  disabled={!canGenerate}
+                  onClick={() => generate.mutate()}
+                >
+                  按驳回意见重新生成
+                </Button>
+              </Tooltip>
+            ) : null}
+            <Link to="/approvals">去审批中心</Link>
+          </Space>
+        }
+      >
         {approvalItems.length === 0 ? (
           <Empty description="该商品还没有审批记录" />
         ) : (
@@ -368,7 +447,7 @@ export default function ProductDetailPage() {
             <BlockRenderer blocks={currentVersion.content_data?.blocks} bordered />
           </>
         ) : (
-          <Empty description="还没有已保存的内容（生成完成并通过审批后会出现在这里）" />
+          <Empty description="还没有已保存的内容（批准后才写入 product_contents；驳回/待审的图文见上方「审批与驳回复盘」）" />
         )}
       </Card>
 

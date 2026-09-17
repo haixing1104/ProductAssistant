@@ -19,7 +19,10 @@ class EvalViolation(BaseModel):
     约定:
         · extra="forbid"（多字段即契约破坏，由 evaluate 节点触发结构修复）；
         · violations 非空时业务层一票否决（EvalOutput.passed 按 False 落账）；
-        · rule_id 仅在规则引擎命中时回填（审计溯源），纯 LLM 违规为 None。
+        · rule_id 仅在规则引擎命中时回填（审计溯源），纯 LLM 违规为 None；
+          severity 同理——由规则层回填（high/medium/low），LLM 不需要产出它。
+          为什么 low 也要进 violations（2026-09）: 低危命中过去被 evaluate 直接丢弃，
+          管理员配的词"命中后什么都没发生"（既不扣分也不可见）；现在它不进否决、但计分、可复核。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -28,6 +31,8 @@ class EvalViolation(BaseModel):
     reason: str = Field(description="违规原因/建议")
     # 规则引擎命中时回填对应 compliance_rules/compliance_words 行 id
     rule_id: str | None = None
+    # 规则引擎命中的严重级（high/medium=阻断；low=仅提示）；纯 LLM 违规为 None
+    severity: str | None = None
 
 class FactChecked(BaseModel):
     """单条事实一致性核验：fact 对照 raw_product_info 的事实基线。

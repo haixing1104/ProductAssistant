@@ -14,7 +14,9 @@
 列表为什么还要有「已处理」:
     只回 ``pending`` 的话，审批人点完按钮那张单就**从界面上消失了** —— 批了什么、
     驳回原因是什么，全都无处可查；商品详情页的「驳回复盘」也依赖同一条能力。
-    因此列表按 ``status`` 过滤（默认 ``pending``，保持既有调用方行为不变）。
+    因此列表按 ``status`` 过滤（默认 ``pending``，保持既有调用方行为不变），
+    并提供 ``status=all`` 显式表达「全部状态（含已定案）」：详情页复盘必须看到驳回单，
+    而缺省语义是 pending —— 这正是 2026-09「驳回后详情页看不到内容」的根因。
 
 连接信息（``approver_name`` / ``notifications``）为什么由 backend 补:
     见 README §2.6：``sys_users`` 对 ai-engine 零权限、``notification_outbox`` 是 backend 域数据，
@@ -30,6 +32,7 @@ from ..core import security
 from ..core.deps import CurrentUser, get_db, require_roles
 from ..schemas.api import ApprovalDecisionRequest, serialize_approval
 from ..services.approval_service import ApprovalService, approver_names
+from ..repositories.approval_audits import overrides_by_approval, redrive_summary_by_approval
 from ..services.notifications import notifications_by_approval
 from .common import ok, to_uuid
 
@@ -40,8 +43,16 @@ router = APIRouter(prefix="/approvals", tags=["approvals"])
 #: 可审批的角色（operator 不在此列，见模块 docstring）
 APPROVER_ROLES = ("admin", "reviewer")
 
-#: 允许的审批状态过滤值（``None`` = 全部）
+#: 允许的审批状态过滤值（具体状态；缺省语义见 ``list_approvals``）
 APPROVAL_STATUSES = ("pending", "approved", "rejected")
+
+#: 「全部状态」哨兵值：显式表达「不过滤」。
+#: 为什么需要它（2026-09 实测事故）:
+#:     缺省（不传 status）等价 ``pending`` 是既有兼容约定，于是商品详情页的
+#:     「审批与驳回复盘」按 product_id 查历史时**永远查不到已定案的单** ——
+#:     界面表现为「该商品还没有审批记录」，而库里其实有驳回单。
+#:     调用方必须能显式说"我要全部"，且不能靠空串（``?status=`` 仍是 400，语义不含糊）。
+ALL_STATUS = "all"
 
 
 def _service(request: Request, session: AsyncSession, user: CurrentUser) -> ApprovalService:
@@ -70,11 +81,16 @@ async def _decorate(
     approval_ids = [item.id for item in approvals]
     names = await _service_names(session, user, approvals)
     notify_map = await notifications_by_approval(session, org_id=user.org_id, approval_ids=approval_ids)
+    # 审计回显：补投痕迹（几次/何时/结果）与「人工放行命中点」记录 —— 两者都是审批可信度的一部分
+    redrive_map = await redrive_summary_by_approval(session, org_id=user.org_id, approval_ids=approval_ids)
+    override_map = await overrides_by_approval(session, org_id=user.org_id, approval_ids=approval_ids)
     out: list[dict] = []
     for approval, product in rows:
         item = serialize_approval(approval, product, include_snapshot=include_snapshot)
         item["approver_name"] = names.get(str(approval.approver_id)) if approval.approver_id else None
         item["notifications"] = notify_map.get(str(approval.id), [])
+        item["redrive"] = redrive_map.get(str(approval.id))
+        item["override"] = override_map.get(str(approval.id))
         out.append(item)
     return out
 
@@ -95,7 +111,7 @@ async def list_approvals(
     status_filter: str | None = Query(
         default=None,
         alias="status",
-        description="pending（默认）/ approved / rejected；留空查全部",
+        description="pending（默认）/ approved / rejected / all（全部，含已定案）；空串非法",
     ),
     product_id: str | None = Query(default=None, description="只看某个商品的审批单（驳回复盘用）"),
     offset: int = Query(default=0, ge=0),
@@ -104,13 +120,15 @@ async def list_approvals(
     session: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_roles(*APPROVER_ROLES)),
 ) -> dict:
-    """审批单列表（默认待审；可查已处理与某个商品的历史）。总数走 ``X-Total-Count``。"""
-    if status_filter is not None and status_filter not in APPROVAL_STATUSES:
+    """审批单列表（默认待审；可查已处理、某商品的历史、以及 ``status=all`` 全量）。"""
+    if status_filter is not None and status_filter not in APPROVAL_STATUSES + (ALL_STATUS,):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"status 只能是 {'/'.join(APPROVAL_STATUSES)}",
+            detail=f"status 只能是 {'/'.join(APPROVAL_STATUSES)} 或 {ALL_STATUS}",
         )
-    effective_status = status_filter if status_filter is not None else "pending"
+    effective_status: str | None = status_filter if status_filter is not None else "pending"
+    if effective_status == ALL_STATUS:
+        effective_status = None  # 哨兵 → 不过滤状态（详情页复盘要看到已定案单）
     rows, total = await _service(request, session, user).list_approvals(
         status=effective_status,
         product_id=to_uuid(product_id) if product_id else None,
@@ -207,9 +225,13 @@ async def redrive(
     session: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_roles("admin")),
 ) -> dict:
-    """补投：对已定案但 ai-engine 未收到的单子重新投递（运维兜底）。"""
+    """补投：对已定案但 ai-engine 未收到的单子重新投递（运维兜底）。
+
+    返回带 ``needed`` / ``outcome``（enqueued / not_needed / throttled / enqueue_failed）：
+    "引擎已消费过该结论"时**不再假装成功**（实测：对已跑完的线程再 resume 是静默 no-op）。
+    """
     service = _service(request, session, user)
-    return ok(await service.redrive(to_uuid(approval_id)))
+    return ok(await service.redrive(to_uuid(approval_id), actor_user_id=user.id))
 
 
 @router.get("/{approval_id}")
@@ -230,6 +252,11 @@ async def get_approval(
     )
     item["approver_name"] = names.get(str(approval.approver_id)) if approval.approver_id else None
     item["notifications"] = notify_map.get(str(approval.id), [])
+    # 审计回显（与列表同一形状）：补投痕迹 + 人工放行记录
+    redrive_map = await redrive_summary_by_approval(session, org_id=user.org_id, approval_ids=[approval.id])
+    override_map = await overrides_by_approval(session, org_id=user.org_id, approval_ids=[approval.id])
+    item["redrive"] = redrive_map.get(str(approval.id))
+    item["override"] = override_map.get(str(approval.id))
     return ok(item)
 
 

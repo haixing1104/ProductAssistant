@@ -137,6 +137,16 @@ class WorkflowResultConsumer:
                 return True  # ① 历史 deleted 行：整条结果跳过（不得复活成 published）
 
             job.status = job_status
+            # 失败原因回传（ai-engine 在 failed 结果里带 ``error``）：商品详情页的
+            # 「最近一次任务失败原因」读的正是 ``generation_jobs.error``（products_router
+            # 的 ``active_job_error``）。不回传时失败在界面上无因可查（2026-09 实测：
+            # 合规拦截看起来就像"商品莫名回到 draft"）。
+            reported_error = payload.get("error")
+            if result == "failed" and reported_error:
+                job.error = str(reported_error)[:1000]
+            elif result in ("published", "awaiting_human", "rejected"):
+                # 成功/待审终态清掉历史失败原因：否则"上一次失败原因"会永久挂在已恢复的商品上
+                job.error = None
             if product.active_thread_id == thread_id:
                 product.status = product_status
                 if product_status in ("published", "draft"):

@@ -10,7 +10,8 @@ def _build_generation_prompt(state: ListingState, attempts: int) -> str:
     """构造生成/反思改写提示词。attempts>0 时携带上轮评估意见做自我纠错（Reflection）。
 
     参数:
-        state: 当前图状态；读 raw_product_info / rag_context / agent_context / last_eval_errors / evaluation_result。
+        state: 当前图状态；读 raw_product_info / rag_context / agent_context / reject_guidance /
+            last_eval_errors / evaluation_result。
         attempts: 已完成的评估次数；>0 表示这是一次 Reflection 重写。
     返回:
         完整生成提示词字符串。
@@ -31,6 +32,15 @@ def _build_generation_prompt(state: ListingState, attempts: int) -> str:
     facts = state.agent_context or ""
     if facts:
         prompt += f"事实要点（由只读工具核对得出，不得与之冲突）：\n{facts}\n"
+    # 人工审批驳回意见（backend 随任务下发）：**最高优先级**的改写指令 ——
+    # 审批人是决策者，其意见必须逐条解决，而不是被当成"参考"。
+    # （历史上的缺口：驳回意见只落 hitl_approvals.feedback，从不进提示词，等于白写。）
+    guidance = (state.reject_guidance or "").strip()
+    if guidance:
+        prompt += (
+            "上一轮人工审批驳回意见（必须逐条解决、不得回避或降级为建议）："
+            f"{guidance}\n"
+        )
     # 如果attempts > 0, 就参考上一轮评估的附加错误自我纠错
     if attempts > 0:
         errors = state.last_eval_errors or (state.evaluation_result.errors if state.evaluation_result else [])

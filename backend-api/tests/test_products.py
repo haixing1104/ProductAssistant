@@ -48,6 +48,39 @@ async def test_create_and_get_product(client: AsyncClient, auth_headers: dict):
     assert body["active_job_status"] is None  # 还没触发过生成
 
 
+async def test_detail_exposes_last_failure_reason_after_terminal(
+    client: AsyncClient, auth_headers: dict, backend_dsn: str, seeded_org: SeededOrg
+):
+    """失败原因在任务**终态之后**仍要能看到（否则界面只剩「商品莫名回到 draft」）。
+
+    实测场景（2026-09）: 标题命中违禁词 → 任务 failed、``active_thread_id`` 被清空 →
+    若详情只读「进行中任务」，``active_job_error`` 恒空 —— 合规拦截在界面上完全不可见。
+    这里锁定「回退到最近一条任务」的行为。
+    """
+    from tests.conftest import seed_job
+
+    thread_id = seed_job(
+        backend_dsn,
+        org_id=seeded_org.org_id,
+        product_id=seeded_org.product_id,
+        job_status="failed",
+        product_status="draft",
+    )
+    reason = "input_compliance_blocked(商品标题): 命中违禁词「最便宜」（广告法种子）"
+    _exec(
+        backend_dsn,
+        "UPDATE schema_pa_backend.generation_jobs SET error = %s WHERE thread_id = %s",
+        (reason, thread_id),
+    )
+
+    detail = await client.get(f"{PRODUCTS_URL}/{seeded_org.product_id}", headers=auth_headers)
+
+    assert detail.status_code == 200, detail.text
+    body = detail.json()["data"]
+    assert body["active_job_status"] is None, "已终态：没有进行中任务"
+    assert body["active_job_error"] == reason
+
+
 async def test_raw_images_is_normalized_to_string_array(client: AsyncClient, auth_headers: dict, backend_dsn: str):
     """历史 ``[{url: …}]`` 形状在响应里被规范化为字符串数组（前端只处理一种形状）。"""
     from tests.conftest import _exec

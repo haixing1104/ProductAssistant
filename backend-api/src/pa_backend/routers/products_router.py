@@ -104,13 +104,18 @@ async def get_product(
     session: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_roles(*READ_ROLES)),
 ) -> dict:
-    """商品详情（附 ``active_job_status``：前端据此决定「生成中」按钮态与轮询策略）。"""
+    """商品详情（附 ``active_job_status``：前端据此决定「生成中」按钮态与轮询策略）。
+
+    ``active_job_error`` 取「进行中任务」或**最近一条任务**的失败原因 —— 终态后
+    ``active_thread_id`` 被清空，只有回退到最近一条才能看到「上一次为什么失败」。
+    """
     service = _service(request, session, user)
     product = await service.get_or_404(to_uuid(product_id))
     job = await service.active_job(product)
     payload = serialize_product(product)
     payload["active_job_status"] = job.status if job is not None else None
-    payload["active_job_error"] = job.error if job is not None else None
+    error_job = job if job is not None else await service.latest_job(product)
+    payload["active_job_error"] = error_job.error if error_job is not None else None
     return ok(payload)
 
 

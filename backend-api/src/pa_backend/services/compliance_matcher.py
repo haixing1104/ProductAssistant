@@ -45,8 +45,9 @@ __all__ = [
 SEVERITY_ORDER: dict[str, int] = {"high": 0, "medium": 1, "low": 2}
 #: 命中即阻断的严重级（与 ai-engine ``ports/rule_engine.BLOCKING_SEVERITIES`` 同值）
 BLOCKING_SEVERITIES = frozenset({"high", "medium"})
-#: 规则单独裁决的扣分制（与 ai-engine ``SEVERITY_PENALTY`` 同值）
-SEVERITY_PENALTY: dict[str, float] = {"high": 40.0, "medium": 20.0, "low": 0.0}
+#: 规则单独裁决的扣分制（与 ai-engine ``SEVERITY_PENALTY`` **同值**，改一处必须同步另一处）
+#: low 罚 5：不阻断但要有可见影响（ai-engine 侧同样把 low 计入分数与 violations）
+SEVERITY_PENALTY: dict[str, float] = {"high": 40.0, "medium": 20.0, "low": 5.0}
 
 #: 缺失/非法 severity 的兜底
 _DEFAULT_SEVERITY = "high"

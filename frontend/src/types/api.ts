@@ -140,6 +140,10 @@ export interface Approval {
   approver_name?: string | null;
   /** 通知投递状态（P7 扩展；无 outbox 行为 []） */
   notifications?: ApprovalNotification[];
+  /** 补投痕迹（无记录为 null；见 `approval_redrive_audits`） */
+  redrive?: ApprovalRedrive | null;
+  /** 人工放行记录（仅"带命中点仍被批准"的单存在；见 `approval_overrides`） */
+  override?: ApprovalOverrideInfo | null;
   snapshot_summary?: {
     reason?: string | null;
     score?: number | string | null;
@@ -167,6 +171,21 @@ export interface ApprovalNotification {
   error?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+/** 补投痕迹（`approval_redrive_audits` 只读汇总；无记录时为 null）。 */
+export interface ApprovalRedrive {
+  count: number;
+  last_at?: string | null;
+  /** enqueued=真投递成功；not_needed=引擎已消费（空操作）；throttled=节流窗口内已投过；enqueue_failed=投递失败 */
+  last_outcome?: "enqueued" | "not_needed" | "throttled" | "enqueue_failed" | string | null;
+}
+
+/** 人工放行记录（`approval_overrides`；仅"带评估命中点仍被批准"的单存在）。 */
+export interface ApprovalOverrideInfo {
+  reason: string;
+  violation_count: number;
+  at?: string | null;
 }
 
 /** 深链票据解析结果（匿名可访问；**不授予审批权限**）。 */

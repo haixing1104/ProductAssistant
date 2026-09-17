@@ -29,6 +29,7 @@ from ..core.config import Settings
 from ..core.errors import ApiError
 from ..models.orm import GenerationJob, Product
 from ..repositories.audits import AuditRepo
+from ..repositories.approvals import latest_rejected_feedback
 from ..repositories.compliance import ComplianceRepo
 from ..repositories.products import ProductRepo
 from .ai_engine_client import AIEngineClient, new_thread_id
@@ -96,6 +97,27 @@ class ProductService:
             GenerationJob.org_id == self.org_id,
             GenerationJob.thread_id == product.active_thread_id,
             GenerationJob.status.in_(("running", "waiting_input")),
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def latest_job(self, product: Product) -> GenerationJob | None:
+        """取该商品最近一条任务（**含已终态**）——「上一次为什么失败」的唯一数据源。
+
+        为什么需要（2026-09 实测）: 任务失败后 ``products.active_thread_id`` 会被清空，
+        ``active_job`` 随即返回 None，于是 ``active_job_error`` 永远是空的 ——
+        合规拦截/异常在界面上表现为「商品莫名回到 draft」，根因完全不可见。
+        （原因本身是好的：``generation_jobs.error`` 已由结果消费器写入。）
+
+        参数:
+            product: 商品行。
+        返回:
+            最近一条任务（按 created_at 倒序）；没有任何任务时返回 None。
+        """
+        stmt = (
+            select(GenerationJob)
+            .where(GenerationJob.org_id == self.org_id, GenerationJob.product_id == product.id)
+            .order_by(GenerationJob.created_at.desc())
+            .limit(1)
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -251,11 +273,19 @@ class ProductService:
         product.status = "generating"
         await self.session.flush()
         rules = await self.compliance.snapshot()
+        # 最近一次驳回意见随任务下发（W8）：让"按意见重写"成为确定性行为，而不是靠 Agent 想起来查
+        guidance = await latest_rejected_feedback(
+            self.session, org_id=self.org_id, product_id=product.id
+        )
         await self.session.commit()
 
         try:
             self.engine.trigger_generation(
-                thread_id=str(thread_id), product_id=str(product.id), org_id=self.org_id, rules=rules
+                thread_id=str(thread_id),
+                product_id=str(product.id),
+                org_id=self.org_id,
+                rules=rules,
+                guidance=guidance,
             )
         except Exception as exc:  # noqa: BLE001 投递失败必须回滚状态，否则商品永远卡在 generating
             job.status = "failed"

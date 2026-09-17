@@ -111,6 +111,43 @@ def test_threads_are_isolated_in_same_checkpointer():
     assert resumed_a["raw_product_info"]["title"] == HIGH_VALUE_INFO["title"]
 
 
+def test_has_checkpoint_guard_for_approval_resume() -> None:
+    """``has_checkpoint``：未 invoke 过的线程必须判 False（审批恢复前的守卫）。
+
+    实测缺口（2026-09）: 脏审批单指向一个图上不存在的线程时，直接 resume 会以"空 State"
+    重跑一遍图 → 节点发事件时 thread_id 为空 → ``ValueError("…收到: 'evt:'")``，
+    现场无法理解；有了这个判据，worker 可以拒绝 resume 并给出可读原因。
+    """
+    wf = _workflow()
+    thread_id = str(uuid.uuid4())
+
+    assert wf.has_checkpoint(thread_id) is False, "没跑过的线程不该被判为有 checkpoint"
+
+    wf.invoke(_state(thread_id, HIGH_VALUE_INFO), config=wf.thread_config(thread_id))
+
+    assert wf.has_checkpoint(thread_id) is True, "挂起后线程已有 checkpoint，可 resume"
+
+
+def test_resume_semantics_on_already_finished_thread() -> None:
+    """已终态线程再 resume：LangGraph 侧是**静默 no-op**（不报错、不重跑、不重复落库、不翻转决策）。
+
+    这条语义决定了「补投」的正确口径（见 backend ``approval_service.redrive``）：
+    对已跑完的线程补投毫无作用，所以后端必须判 ``needed`` 并回 ``not_needed``，而不是假装成功。
+    """
+    wf = _workflow()
+    thread_id = str(uuid.uuid4())
+    config = wf.thread_config(thread_id)
+    assert "__interrupt__" in wf.invoke(_state(thread_id, HIGH_VALUE_INFO), config=config)
+
+    first = wf.resume({"approved": True, "feedback": "放行"}, config=config)
+    assert first.get("status") == "succeeded"
+
+    # 第二次 resume（哪怕换成 rejected）都不改变终态
+    again = wf.resume({"approved": False, "feedback": "改成驳回"}, config=config)
+    assert again.get("status") == "succeeded"
+    assert again.get("approval") == "approved"
+
+
 @pytest.mark.parametrize("decision", [{"approved": True}, {"approved": False}])
 def test_resume_is_idempotent_per_decision(decision):
     """resume 语义稳定：同一决策值分别走通「批准/驳回」两条终态。"""

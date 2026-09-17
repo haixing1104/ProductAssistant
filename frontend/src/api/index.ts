@@ -109,7 +109,10 @@ export const evaluationLogsApi = {
 };
 
 export const approvalsApi = {
-  /** 列表：`status` 缺省 = pending（backend 默认口径）；`productId` 用于商品详情页的驳回复盘。 */
+  /**
+   * 列表：`status` 缺省 = pending（backend 兼容约定）；
+   * 商品详情页的「审批与驳回复盘」必须显式传 `"all"`，否则已定案（批准/驳回）的单查不到。
+   */
   list: (params?: ListParams & { status?: string; productId?: string; withSnapshot?: boolean }) =>
     unwrapPage<Approval>(
       http.get("/approvals", {

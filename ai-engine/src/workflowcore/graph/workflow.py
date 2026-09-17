@@ -357,6 +357,22 @@ class _WorkflowWrapper:
         state = {**state, "max_retries": self.max_retries}
         return self.graph.invoke(state, config=config)
 
+    def has_checkpoint(self, thread_id: str) -> bool:
+        """该线程是否已有 checkpoint（审批恢复前的守卫，纯读）。
+
+        为什么需要（2026-09 实测）: 对**没有 checkpoint** 的线程执行 ``resume`` 不会报错，
+        而是以"空 State"重跑一遍图 —— 节点在发事件时 thread_id 为空，抛出
+        ``ValueError("topic 需为 'evt:{thread_id}' …收到: 'evt:'")``，现场极难理解；
+        更糟的是这次重跑可能产生半成品副作用。宁可在这里显式判定并给出可读原因。
+
+        参数:
+            thread_id: 线程 ID。
+        返回:
+            True 表示该线程已有状态（可以 resume）；False 表示查不到（脏审批单 / 库被重置）。
+        """
+        snapshot = self.graph.get_state(self.thread_config(thread_id))
+        return bool(snapshot.created_at is not None or snapshot.values or snapshot.next)
+
     def resume(self, decision: dict, config: dict | None = None) -> dict:
         """HITL 恢复：以 Command(resume=decision) 从断点继续执行。
 

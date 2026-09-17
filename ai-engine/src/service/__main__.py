@@ -11,7 +11,9 @@
   REDIS_URL               Redis 连接串（默认 redis://localhost:6379/0）
   AI_ENGINE_PG_DSN        运行期 DSN；缺省时用 POSTGRES_* + role_pa_ai / ROLE_PA_AI_PWD 拼装
   AI_ENGINE_SETUP_PG_DSN  建表 DSN；缺省时用 POSTGRES_* + role_pa_ai_setup / ROLE_PA_AI_SETUP_PWD 拼装
-  AI_ENGINE_RULE_PRECHECK 置 1/true/yes 时对商品标题做阻断级违禁词预检（默认关）
+  AI_ENGINE_RULE_PRECHECK 输入侧合规预检（**默认开**）：对商品标题做阻断级（high/medium）
+                          违禁词预检，命中即阻止生成（任务 failed、商品回 draft）。
+                          显式置 0/false/no/off 关闭（放弃"标题"这一侧的合规拦截）。
   —— Redis Streams 可靠性（PEL 回收 / 死信 / 流保留 / 心跳）——
   AI_ENGINE_PEL_MIN_IDLE_MS      PEL 滞留判定（毫秒，默认 60000）：空闲超过该值的未 ack 消息回收重试
   AI_ENGINE_PEL_CLAIM_BATCH      每轮单次回收条数上限（默认 10；0 = 关闭回收）
@@ -92,6 +94,39 @@ def _agent_enabled_from_env() -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _rule_precheck_enabled_from_env() -> bool:
+    """输入侧合规预检开关（**默认开**；显式 0/false/no/off 才关闭）。
+
+    为什么默认开（2026-09 实测事故）:
+        `AI_ENGINE_RULE_PRECHECK` 原先默认关，而 seed 词表里就有「最便宜」「国家级」这类红线词：
+        结果是**标题违规也照样生成、照样上架**（实测商品 A-3C-0023 标题 =「最便宜的水杯」，
+        创建 20:59:13 → 触发 20:59:17 → 已 published，日志里连一条预检记录都没有）。
+        合规闸门的正确默认方向是「宁可多拦，不可漏放」。
+
+    取值口径（与 `_agent_enabled_from_env` **方向相反**，此处是 fail-safe）:
+        · 未配置 / 空白 / 无法识别 → **开**（并打印一条取值提示，避免"拼错 = 静默关闸门"）；
+        · 显式 `0/false/no/off/disable/disabled` → 关（运维明确要求放行这一侧）；
+        · `1/true/yes/on` → 开。
+
+    返回:
+        True: 对商品标题做阻断级（high/medium）违禁词预检，命中即阻止生成；
+        False: 不做输入侧预检（生成链路行为与未接入规则引擎时一致）。
+    注意:
+        预检只在「载荷带规则快照」时生效（`_rule_engine_from_message` 返回 None 即无规则可比），
+        因此本开关打开也不会让"没有配置合规词"的环境产生误拦。
+    """
+    raw = os.getenv("AI_ENGINE_RULE_PRECHECK")
+    if raw is None or not raw.strip():
+        return True  # 未配置 / 空白 → 默认开
+    token = raw.strip().lower()
+    if token in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if token not in {"1", "true", "yes", "on"}:
+        # 无法识别的取值（如 typo）：按默认（开）处理，并把取值打出来 —— 合规闸门不因拼写静默失效
+        log(f"[worker] AI_ENGINE_RULE_PRECHECK={raw!r} 无法识别，按默认（开）处理")
+    return True
+
+
 def _env_int(name: str, default: int) -> int:
     """读取整数型环境变量（未配置/空白/非法值一律回落到默认值）。
 
@@ -121,7 +156,12 @@ def main() -> None:
     configure_logging()
     env = os.getenv("PA_ENV", "dev")
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    rule_precheck = os.getenv("AI_ENGINE_RULE_PRECHECK", "0").lower() in {"1", "true", "yes"}
+    rule_precheck = _rule_precheck_enabled_from_env()
+    # 启动即声明这条闸门的状态：合规预检"关着"时，标题违规也能一路生成上架（历史事故）
+    log(
+        f"[worker] 输入合规预检：{'开' if rule_precheck else '关'}"
+        f"（范围=商品标题；开关 AI_ENGINE_RULE_PRECHECK）"
+    )
     # Agent 研究（默认开）：开启后会在图内产生额外的模型调用与只读取数 ——
     # 默认预算已相应收紧为 2 轮模型调用 / 3 次工具（见 workflowcore/agent/middleware.py 的常量）；
     # 置 AI_ENGINE_AGENT_ENABLED=0 可关闭（一行 env 即恢复「与未接入 Agent 时完全一致」）。
