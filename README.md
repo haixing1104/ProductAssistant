@@ -987,12 +987,57 @@ GET /api/v1/products/{id}/stream?ticket=…    ← SSE：回放 + 尾随（无�
 | `OutboxDeliverer` | 投递审批通知（outbox → 钉钉/控制台） | 指数退避重试，达上限转 `dlq` |
 | `ApprovalRedriveWatchdog` | 补投「已定案但 ai-engine 未收到」的 resume | 同上，且带 Redis 节流防重复投递 |
 
+#### 一键启动（本地三进程 + 完整 RAG 链路）
+
+```bash
+./scripts/dev-up.sh          # 前台：三路日志实时滚动（[backend] / [ai-engine] / [frontend]），Ctrl-C 一键收盘
+./scripts/dev-up.sh --detach # 后台：日志落盘 /tmp/padev/*.log，用 ./scripts/dev-logs.sh 跟进
+./scripts/dev-down.sh        # 停三进程（容器保留）；--with-infra 连容器一起停（数据卷保留）
+```
+
+脚本做的事（每一步都有可读输出，失败给出确切处置命令）：
+
+1. **前置自检**：`infra/.env` 存在并导出 → `env-check.sh` 快检 → 三个模块的 venv/node_modules 齐备 →
+   PG 可达（`pg_isready`）→ 8000/5173 端口空闲（**占用则指名占用者，不静默换端口**）→ 无上次遗留进程；
+2. **基础设施**：Redis 缺失自动拉起；etcd/minio/milvus 一并拉起（Milvus 依赖前两者 healthy，
+   首启需拉镜像 + 30s 缓冲，长等待每 10s 打印进度）→ Milvus healthy 后**幂等**初始化集合
+   `pa_listing_vec`（`database/milvus/init_collections.py`）；容器若已由 `docker run` 手工起（无 compose 标签）
+   则直接 `docker start` 复用，避免同名冲突；
+3. **三进程**：各自独立**会话/进程组**启动（`setsid --fork`），日志实时加前缀回显 + 同时落盘**原始行**
+   （可 grep/回溯）；`PYTHONUNBUFFERED=1` 保证 Python 逐行实时；
+4. **就绪探测**（探真实依赖，不看进程存活）：backend `/readyz`（PG+Redis 都通才算好）、
+   frontend 返回含 `id="root"` 的 SPA、ai-engine 出现 `pa:{env}:worker:heartbeat:*`（真在消费）；
+   Milvus 未就绪**不阻塞**启动，只告警「RAG 降级」（worker 本身支持降级运行）；
+5. **停止**：按进程组 `TERM → 2s → KILL`，连 vite 的 node 子进程、uvicorn 的 reloader 一起收，
+   再用项目级 `pkill` 兜底 —— 保证不留孤儿占住端口。
+
+常用开关：`--no-ai`（只起前后端，省内存）、`--no-infra`（不动容器）、`--no-reload`、`--strict-env`（env-check 的 WARN 也阻断）。
+
+#### 日志与排障（三进程 + 跨进程串接）
+
+```bash
+./scripts/dev-logs.sh all            # 或 backend / ai-engine / frontend（带服务前缀实时跟随）
+grep -a 'POST /api/v1/products'      /tmp/padev/backend.log   # 触发生过生成没
+grep -a '/stream?ticket'             /tmp/padev/backend.log   # SSE 连了几次（「生成后 0 次」= 前端没重连）
+grep -a 'result-consumer'            /tmp/padev/backend.log   # 结果是否被消费、商品被推进到什么状态
+grep -a 'request_id=<id>'            /tmp/padev/*.log         # 一次生成跨 backend/ai-engine/result 三段日志串起来
+```
+
+- 日志落盘 `${PAD_LOG_DIR:-/tmp/padev}/{backend,ai-engine,frontend}.log`，**每次启动把上一轮滚成 `.log.1`**
+  （保留 `PAD_LOG_KEEP` 份，默认 3）—— 不再清空历史现场；
+- 三份日志都带**时间戳**（backend 由 `core/logging.py`、ai-engine 由 `service/logging_setup.py` 装配，
+  级别可用 `BACKEND_LOG_LEVEL` / `AI_ENGINE_LOG_LEVEL` 调）；
+- `X-Request-Id` 由前端注入 → backend 写进 `job:generate` → ai-engine 与 result 消费器日志打印 → 全链路可 grep（见 backend README §2.2）；
+- **商品卡在「生成中」、按钮点不动**：自动兜底是 reaper（超期回收）+ 守卫宽容（再点一次生成即自愈）；
+  要立刻处置去 `/ops` 面板「卡住任务」→ 终止（写审计）。完整 SOP 见 `backend-api/README.md` §六。
+
 #### 运行与测试
 
 ```bash
 # 依赖隔离：本模块与 ai-engine 各自独立 venv，严禁合并
 cd backend-api && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 # 本地运行（宿主已起 PG；Redis 见 infra/docker-compose.yml）
+# 提示：日常直接用 ./scripts/dev-up.sh 起全栈；下面是与脚本等价的手工命令
 set -a && source ../infra/.env && set +a
 .venv/bin/uvicorn pa_backend.main:app --app-dir src --port "${BACKEND_PORT:-8000}"
 

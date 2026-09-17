@@ -324,6 +324,7 @@ def seed_job(
     job_status: str = "running",
     product_status: str = "generating",
     bind_active_thread: bool = True,
+    age_minutes: int = 0,
 ) -> str:
     """造一条生成任务并把商品置于指定状态（P4 状态机用例的公共夹具）。
 
@@ -335,15 +336,19 @@ def seed_job(
         product_status: ``products.status``（generating / waiting_approval / …）。
         bind_active_thread: 是否把 ``products.active_thread_id`` 指向本线程
             （False = 模拟「旧线程晚到」场景）。
+        age_minutes: 把 ``updated_at`` 回拨多少分钟（造「僵死任务」用；reaper 用例需要）。
+            **必须在 INSERT 时赋值**：``generation_jobs`` 有 ``BEFORE UPDATE`` 触发器把
+            ``updated_at`` 强制写成 ``now()``，UPDATE 回拨会被立刻覆盖。
     返回:
         新造的 ``thread_id``。
     """
     thread_id = str(uuid.uuid4())
     _exec(
         backend_dsn,
-        "INSERT INTO schema_pa_backend.generation_jobs (thread_id, org_id, product_id, status) "
-        "VALUES (%s, %s, %s, %s)",
-        (thread_id, org_id, product_id, job_status),
+        "INSERT INTO schema_pa_backend.generation_jobs "
+        "(thread_id, org_id, product_id, status, created_at, updated_at) "
+        "VALUES (%s, %s, %s, %s, now() - make_interval(mins => %s), now() - make_interval(mins => %s))",
+        (thread_id, org_id, product_id, job_status, age_minutes, age_minutes),
     )
     _exec(
         backend_dsn,

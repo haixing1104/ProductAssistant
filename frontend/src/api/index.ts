@@ -4,6 +4,7 @@
 import { http } from "../services/http";
 import type {
   Approval,
+  AbortJobResult,
   CompliancePreviewResult,
   ComplianceRule,
   ComplianceSnapshotResponse,
@@ -180,5 +181,12 @@ export const complianceApi = {
 export const opsApi = {
   overview: () => unwrap<OpsOverview>(http.get("/ops/overview")),
   dlq: (domain: string, limit = 20) => unwrap<DlqEntries>(http.get("/ops/dlq", { params: { domain, limit } })),
+  /**
+   * 终止卡死的生成任务（admin 独占；**必填原因**，写 job_abort_audits 审计）。
+   *
+   * 用途：解开「商品永久 409 / 详情页按钮点不动」的死锁（过去只能人肉改库）。
+   */
+  abortJob: (jobId: string, reason: string) =>
+    unwrap<AbortJobResult>(http.post(`/ops/jobs/${jobId}/abort`, { reason })),
 };
 

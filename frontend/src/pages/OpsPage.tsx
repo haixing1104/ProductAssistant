@@ -1,21 +1,48 @@
-// 运维面板（PA 独有，仅 admin）：worker 心跳 / 契约流与消费组 PEL / 死信队列（DLQ）回看。
+// 运维面板（PA 独有，仅 admin）：worker 心跳 / 契约流与消费组 PEL / 死信队列（DLQ）回看 /
+// 卡住任务（**唯一**变更入口：终止 → 写审计）。
 //
-// 为什么页面上**没有**「重投」按钮（刻意的设计取舍）:
+// 为什么读面**没有**「重投」按钮（刻意的设计取舍）:
 //   DLQ 里的消息是「重试到上限仍失败」的 —— 根因多半是商品数据异常或外部依赖不可用。
-//   一键重投只会再造一条毒消息、并掩盖根因。因此这里**只呈现事实**，处置走 backend-api/README
+//   一键重投只会再造一条毒消息、并掩盖根因。因此读面**只呈现事实**，处置走 backend-api/README
 //   里的 SOP（判根因 → 修数据/等依赖 → 重投或重新触发生成）。
 //
-// 三个必看的判据（放在最显眼的位置）:
+// 唯一的例外是「卡住任务」的**终止**（P8）:
+//   卡在 running 的任务会让商品**永久 409**（详情页按钮也变成不可点），过去只能人肉改库且不留痕。
+//   终止必须填原因 → 写入 job_abort_audits（只增不改）；后台 reaper 也会自动回收，
+//   本入口用于「不等阈值、立刻处置」。
+//
+// 四个必看的判据（放在最显眼的位置）:
 //   1) `stalled`（一个心跳都没有）= 消费侧完全停滞 —— 不是「健康」，必须红；
 //   2) 流长度 + 消费组 `pending`：pending 持续增长 = 消费能力不足（积压）；
-//   3) DLQ 非空 = 有消息被打成毒消息，需要人工介入。
-import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Empty, Space, Table, Tag, Typography } from "antd";
+//   3) DLQ 非空 = 有消息被打成毒消息，需要人工介入；
+//   4) 卡住任务非空 = 有商品正卡在「生成中」且用户点不动 —— 要么等 reaper，要么在这里终止。
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Input,
+  Modal,
+  Space,
+  Table,
+  Tag,
+  Typography,
+  message,
+} from "antd";
 import { useState } from "react";
 
 import { opsApi } from "../api";
 import { apiErrorMessage } from "../services/errors";
-import type { DlqEntry, DlqSummary, StreamOverview, WorkerHeartbeat } from "../types/api";
+import { productStatusLabel } from "../services/productMeta";
+import type {
+  DlqEntry,
+  DlqSummary,
+  StreamOverview,
+  StuckJob,
+  WorkerHeartbeat,
+} from "../types/api";
 
 /** 心跳 TTL 分级：ai-engine 默认每 30s 刷新一次，接近到期就要预警（避免「看着活着其实刚断」）。 */
 export function heartbeatMeta(worker: WorkerHeartbeat): { label: string; color: string } {
@@ -26,13 +53,40 @@ export function heartbeatMeta(worker: WorkerHeartbeat): { label: string; color: 
   return { label: `存活（TTL ${ttl}s）`, color: "green" };
 }
 
+/** 卡住任务的「多久没推进」文案（人看得懂比精确更重要）。 */
+export function stuckAgeLabel(ageSeconds?: number | null): string {
+  if (ageSeconds === null || ageSeconds === undefined) return "-";
+  if (ageSeconds < 60) return `${ageSeconds}s`;
+  if (ageSeconds < 3600) return `${Math.floor(ageSeconds / 60)}min`;
+  return `${(ageSeconds / 3600).toFixed(1)}h`;
+}
+
 export default function OpsPage() {
+  const qc = useQueryClient();
   const [domain, setDomain] = useState<string | null>(null);
+  // 「终止」需要必填原因（审计要求）：用一个受控的待终止任务 + 原因输入
+  const [pendingAbort, setPendingAbort] = useState<StuckJob | null>(null);
+  const [abortReason, setAbortReason] = useState("");
   const overview = useQuery({ queryKey: ["ops", "overview"], queryFn: () => opsApi.overview() });
   const dlq = useQuery({
     queryKey: ["ops", "dlq", domain],
     queryFn: () => opsApi.dlq(domain as string, 20),
     enabled: Boolean(domain),
+  });
+  const abort = useMutation({
+    mutationFn: ({ jobId, reason }: { jobId: string; reason: string }) =>
+      opsApi.abortJob(jobId, reason),
+    onSuccess: (result) => {
+      message.success(
+        result.product_released
+          ? "任务已终止，商品已回到草稿（可重新生成）"
+          : "任务已终止（商品已被更新的任务接管，未改动商品状态）",
+      );
+      setPendingAbort(null);
+      setAbortReason("");
+      qc.invalidateQueries({ queryKey: ["ops", "overview"] });
+    },
+    onError: (e) => message.error(apiErrorMessage(e, "终止任务失败")),
   });
   const data = overview.data;
 
@@ -40,7 +94,7 @@ export default function OpsPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       <Space style={{ width: "100%", justifyContent: "space-between" }} wrap>
         <Typography.Title level={4} style={{ margin: 0 }}>
-          运维面板（只读）
+          运维面板（读面只读 · 唯一变更：终止卡死任务）
         </Typography.Title>
         <Space>
           <Typography.Text type="secondary">
@@ -136,6 +190,107 @@ export default function OpsPage() {
           ]}
         />
       </Card>
+
+      <Card
+        size="small"
+        title="卡住任务（超期未推进 → 会让商品永久「生成中」且按钮点不动）"
+        extra={
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            判据与后端回收器（reaper）同源；后台会自动回收，这里用于**立刻**处置（写审计）
+          </Typography.Text>
+        }
+      >
+        {(data?.stuck_jobs ?? []).length === 0 ? (
+          <Empty description="没有卡住的任务（健康）" />
+        ) : (
+          <Table<StuckJob>
+            rowKey="job_id"
+            size="small"
+            pagination={false}
+            dataSource={data?.stuck_jobs ?? []}
+            columns={[
+              { title: "SKU", dataIndex: "sku_code", render: (v: string | null) => v ?? "-" },
+              {
+                title: "线程",
+                dataIndex: "thread_id",
+                width: 120,
+                render: (v: string) => `${v.slice(0, 8)}…`,
+              },
+              {
+                title: "任务状态",
+                dataIndex: "job_status",
+                width: 130,
+                render: (v: string | undefined) => <Tag color="orange">{v ?? "-"}</Tag>,
+              },
+              {
+                title: "商品状态",
+                dataIndex: "product_status",
+                width: 130,
+                render: (v: string | null) => (v ? <Tag>{productStatusLabel(v)}</Tag> : "-"),
+              },
+              {
+                title: "停滞时长",
+                dataIndex: "age_seconds",
+                width: 110,
+                render: (v: number | null | undefined) => stuckAgeLabel(v),
+              },
+              {
+                title: "操作",
+                width: 110,
+                render: (_: unknown, row: StuckJob) => (
+                  <Button
+                    size="small"
+                    danger
+                    onClick={() => {
+                      setPendingAbort(row);
+                      setAbortReason("");
+                    }}
+                  >
+                    终止
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Card>
+
+      <Modal
+        open={Boolean(pendingAbort)}
+        title="终止卡住的生成任务"
+        okText="终止并写审计"
+        okButtonProps={{ danger: true, disabled: abortReason.trim().length === 0 }}
+        confirmLoading={abort.isPending}
+        onOk={() => {
+          if (pendingAbort) {
+            abort.mutate({ jobId: pendingAbort.job_id, reason: abortReason.trim() });
+          }
+        }}
+        onCancel={() => {
+          setPendingAbort(null);
+          setAbortReason("");
+        }}
+      >
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Typography.Text>
+            线程 <Typography.Text code>{pendingAbort?.thread_id.slice(0, 8)}…</Typography.Text> ·
+            商品 <Typography.Text code>{pendingAbort?.sku_code ?? "-"}</Typography.Text> · 停滞{" "}
+            {stuckAgeLabel(pendingAbort?.age_seconds)}
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            终止后：任务置为 failed、商品回到草稿（可重新生成）。原因会写入 job_abort_audits
+            审计表（只增不改），请写清「为什么判定它已死」。
+          </Typography.Text>
+          <Input.TextArea
+            rows={3}
+            maxLength={200}
+            showCount
+            value={abortReason}
+            placeholder="例如：worker 已被 kill，Redis 中无该线程消息，人工确认可终止"
+            onChange={(e) => setAbortReason(e.target.value)}
+          />
+        </Space>
+      </Modal>
 
       <Card
         size="small"

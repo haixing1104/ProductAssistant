@@ -1,4 +1,4 @@
-"""运维只读面：消费心跳 / 消费组待处理（PEL） / 死信队列（DLQ）。
+"""运维只读面：消费心跳 / 消费组待处理（PEL） / 死信队列（DLQ） / 卡住的生成任务。
 
 为什么 backend 要提供这一面:
     ai-engine 那边把可靠性做得很足（PEL 回收、DLQ、心跳、幂等标记），但这些能力**只有能被看见**
@@ -6,8 +6,9 @@
     是登上 Redis 手工敲命令 —— 而 Redis 在容器里、生产还不暴露端口。
 
 设计约束（**只读**）:
-    · 本模块只做 ``XLEN`` / ``XINFO GROUPS`` / ``XRANGE`` / ``SCAN`` / ``TTL``，**不写任何键**；
-      重投/清理属变更操作，必须有明确 SOP（见 README），不在接口里「顺手」提供；
+    · 本模块只做 ``XLEN`` / ``XINFO GROUPS`` / ``XRANGE`` / ``SCAN`` / ``TTL`` 与**只读 SELECT**
+      （卡住任务清单），**不写任何键、不改任何行**；
+      处置属变更操作，必须有明确 SOP —— 唯一例外是 ``POST /ops/jobs/{id}/abort``（见 ops_router）；
     · 每个命令**独立 try/except**：某个流不存在（还没被消费过）不能让整页报错 ——
       运维面板最怕「一个指标缺失就整页红」；
     · 全部要求 ``admin``：键名与消息内容属于内部运维信息。
@@ -16,17 +17,27 @@
     ``pa:{env}:worker:heartbeat:{consumer}`` 是带 TTL 的键（ai-engine 默认 30s 刷新一次），
     **键过期即代表没有进程在消费**。因此「一个心跳键都没有」= 消费侧完全停滞，
     而不是「一切正常」—— 这一点必须在响应里显式表达（``stalled``），否则面板会显示成绿色。
+
+卡住任务判据（与 ``GenerationJobReaper`` 同一口径）:
+    ``generation_jobs.status ∈ (running, waiting_input)`` 且 ``updated_at`` 超过
+    ``BACKEND_JOB_STALE_MINUTES``。**刻意不读** ``pa:{env}:lock:{thread_id}`` —— 那是
+    worker↔worker 的内部互斥键，契约规定 backend 不得读写（``core/keys.py`` 未暴露）。
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.config import Settings
 from ..core.keys import RedisKeys
 from ..core.redis_client import new_async_redis
+from ..models.orm import GenerationJob, Product
 from .event_envelope import decode_fields
+from .generation_job_reaper import STALE_CANDIDATE_STATUSES
 
 __all__ = ["OpsReader"]
 
@@ -36,19 +47,34 @@ CONTRACT_STREAMS = ("job_generate", "job_approval", "job_product_purge", "workfl
 #: DLQ 单次最多回看多少条消息
 DLQ_MAX_ENTRIES = 100
 
+#: 卡住任务清单最多列出多少条（面板只为「看见并终止」，不需要全量）
+STUCK_JOBS_LIMIT = 50
+
 
 class OpsReader:
     """运维只读读取器（一次请求一个实例，用完 ``close``）。"""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        session: AsyncSession | None = None,
+        org_id: str | None = None,
+    ) -> None:
         """初始化。
 
         参数:
-            settings: 应用配置（读 ``env`` / ``redis_url``）。
+            settings: 应用配置（读 ``env`` / ``redis_url`` / ``job_stale_minutes``）。
+            session: DB 会话（只用于**只读** SELECT：卡住任务清单）。为 None 时该项返回空列表
+                —— 让「只想要 Redis 指标」的调用方（与既有单测）不必依赖数据库。
+            org_id: 当前租户。**只影响 DB 读取的租户过滤**（Redis 指标是环境级的，天然跨租户）；
+                为 None 时数据库项返回空列表，避免「忘了传租户」变成跨租户泄露。
         """
         self._settings = settings
         self._keys = RedisKeys(settings.env)
         self._client = new_async_redis(settings)
+        self._session = session
+        self._org_id = org_id
 
     async def close(self) -> None:
         """关闭连接（幂等）。"""
@@ -58,10 +84,10 @@ class OpsReader:
             pass
 
     async def overview(self) -> dict[str, Any]:
-        """汇总：worker 心跳 / 契约流与消费组 / DLQ 概况。
+        """汇总：worker 心跳 / 契约流与消费组 / DLQ 概况 / 卡住的生成任务。
 
         返回:
-            ``{"env", "generated_at", "workers", "stalled", "streams", "dlq"}``。
+            ``{"env", "generated_at", "workers", "stalled", "streams", "dlq", "stuck_jobs"}``。
         """
         workers = await self._workers()
         return {
@@ -72,7 +98,52 @@ class OpsReader:
             "stalled": not any(item["alive"] for item in workers),
             "streams": await self._streams(),
             "dlq": await self._dlq_summary(),
+            "stuck_jobs": await self._stuck_jobs(),
         }
+
+    async def _stuck_jobs(self) -> list[dict[str, Any]]:
+        """列出超期未推进的生成任务（面板据此提供「终止」入口）。
+
+        判据与 ``GenerationJobReaper`` 完全一致（同一常量），因此**面板里看到的就是会被回收的**。
+        只读 SELECT；**必带租户过滤**（admin 也是租户内角色，不得看到别的租户的任务）——
+        缺 session 或缺 org_id 时返回空列表（宁可少显示，不可越权显示）。
+        """
+        if self._session is None or self._org_id is None:
+            return []
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(minutes=max(1, self._settings.job_stale_minutes))
+        stmt = (
+            select(GenerationJob, Product.sku_code, Product.status)
+            .join(Product, Product.id == GenerationJob.product_id)
+            .where(
+                GenerationJob.org_id == self._org_id,
+                GenerationJob.status.in_(STALE_CANDIDATE_STATUSES),
+                GenerationJob.updated_at <= cutoff,
+            )
+            .order_by(GenerationJob.updated_at)
+            .limit(STUCK_JOBS_LIMIT)
+        )
+        try:
+            rows = (await self._session.execute(stmt)).all()
+        except Exception as exc:  # noqa: BLE001 单指标失败不让整屏报错（与其它指标同一取舍）
+            return [{"error": f"查询失败：{type(exc).__name__}"}]
+        out: list[dict[str, Any]] = []
+        for job, sku_code, product_status in rows:
+            updated = job.updated_at
+            if updated is not None and updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc)
+            out.append(
+                {
+                    "job_id": str(job.id),
+                    "thread_id": str(job.thread_id),
+                    "product_id": str(job.product_id),
+                    "sku_code": sku_code,
+                    "product_status": product_status,
+                    "job_status": job.status,
+                    "age_seconds": int((now - updated).total_seconds()) if updated else None,
+                }
+            )
+        return out
 
     async def _workers(self) -> list[dict[str, Any]]:
         """列出心跳键（消费进程）及其存活状态。"""

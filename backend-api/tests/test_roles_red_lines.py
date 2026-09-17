@@ -6,7 +6,8 @@
 
 覆盖（与 backend-api/README §六 的红线清单一一对应）:
     ① ``role_pa_backend`` 写 ``schema_pa_ai.product_contents`` 必须被拒（AI 域归 ai-engine）；
-    ② ``role_pa_backend`` 对 ``delete_audits`` 的 UPDATE / DELETE 必须被拒（审计只能追加）。
+    ② ``role_pa_backend`` 对 ``delete_audits`` 的 UPDATE / DELETE 必须被拒（审计只能追加）；
+    ③ ``role_pa_backend`` 对 ``job_abort_audits``（0005 运维终止审计）同上。
 """
 
 from __future__ import annotations
@@ -65,3 +66,24 @@ def test_delete_audits_is_append_only(backend_dsn: str, seeded_org):
         backend_dsn, "UPDATE schema_pa_backend.delete_audits SET reason = '改一下' WHERE id = %s", (audit_id,)
     )
     _expect_denied(backend_dsn, "DELETE FROM schema_pa_backend.delete_audits WHERE id = %s", (audit_id,))
+
+
+def test_job_abort_audits_is_append_only(backend_dsn: str, seeded_org):
+    """③ ``job_abort_audits``（0005）同样只能追加 —— 运维终止任务的记录必须改不掉、删不掉。"""
+    audit_id = str(uuid.uuid4())
+    thread_id = str(uuid.uuid4())
+    with psycopg.connect(backend_dsn, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO schema_pa_backend.job_abort_audits "
+            "(id, org_id, job_id, thread_id, product_id, actor_user_id, reason) "
+            "VALUES (%s, %s, gen_random_uuid(), %s, %s, %s, '权限矩阵用例')",
+            (audit_id, seeded_org.org_id, thread_id, seeded_org.product_id, seeded_org.user_id),
+        )
+    _expect_denied(
+        backend_dsn,
+        "UPDATE schema_pa_backend.job_abort_audits SET reason = '改一下' WHERE id = %s",
+        (audit_id,),
+    )
+    _expect_denied(
+        backend_dsn, "DELETE FROM schema_pa_backend.job_abort_audits WHERE id = %s", (audit_id,)
+    )

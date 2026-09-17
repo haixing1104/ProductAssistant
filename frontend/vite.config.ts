@@ -21,7 +21,9 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
     // 覆盖率门禁（与 backend/ai-engine 对等）：只覆盖「薄逻辑层」（store / 服务 / 纯函数）。
-    // UI 页面受 jsdom + antd 约束不做单测覆盖，由真实全栈冒烟 + E2E 守护。
+    // UI 页面受 jsdom + antd 约束**不进覆盖率统计**，由真实全栈冒烟 + E2E 守护；
+    // 例外：ProductDetailPage / OpsPage 各有一份**页面级回归用例**（生成卡住事故 + 终止卡住任务），
+    // 只在必要时加、只断言交互语义（连流次数 / 按钮态 / 请求体），不追求渲染细节覆盖。
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

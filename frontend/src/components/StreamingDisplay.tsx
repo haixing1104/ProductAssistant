@@ -24,6 +24,14 @@ interface Props {
   onWaiting?: () => void;
   /** 生成完成（done）时通知一次，供父级拉取最新内容 */
   onDone?: () => void;
+  /**
+   * 服务端回 ``ready``（它认为该商品没有进行中任务）时通知一次。
+   *
+   * 用途：让父级**纠偏**一次商品状态 —— ready 往往意味着「任务早已结束，只是本页的流断了」，
+   * 没有这个回调时 UI 会一直停在「生成中…」直到手动刷新。
+   * 注意：不改变 ``sse.ts`` 的语义（``ready`` 仍然**不重连**，只是多通知一次父级刷新）。
+   */
+  onNoActiveTask?: () => void;
   height?: number;
 }
 
@@ -86,6 +94,7 @@ export default function StreamingDisplay({
   onTerminal,
   onWaiting,
   onDone,
+  onNoActiveTask,
   height = 280,
 }: Props) {
   const [text, setText] = useState("");
@@ -96,8 +105,8 @@ export default function StreamingDisplay({
   const [attemptSeed, setAttemptSeed] = useState(0); // 「重试」按钮：+1 触发重连
   const boxRef = useRef<HTMLPreElement | null>(null);
   const pinnedRef = useRef(true); // 用户没往上翻时自动滚到底
-  const callbacks = useRef({ onTerminal, onWaiting, onDone });
-  callbacks.current = { onTerminal, onWaiting, onDone };
+  const callbacks = useRef({ onTerminal, onWaiting, onDone, onNoActiveTask });
+  callbacks.current = { onTerminal, onWaiting, onDone, onNoActiveTask };
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -150,7 +159,12 @@ export default function StreamingDisplay({
       onFrame: handleFrame,
       onIdle: () => setState("空闲（服务端已关流），自动续连中…"),
       onTransientError: (reason) => setState(`连接中断：${reason}，自动重试中…`),
-      onReady: () => setState("（暂无进行中任务）"),
+      onReady: () => {
+        setState("（暂无进行中任务）");
+        // ready = 服务端认为没有进行中任务：顺手让父级刷新一次商品状态做纠偏
+        // （典型场景：任务其实已结束，只是本页的流断在了之前 —— 否则按钮会一直停着）。
+        callbacks.current.onNoActiveTask?.();
+      },
       onTerminal: (type) => {
         if (type === "hitl.waiting") setState("✋ 已生成，等待人工审批中");
         else if (type === "done") setState("生成完成");

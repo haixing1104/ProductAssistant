@@ -28,12 +28,25 @@ import redis
 
 from ..core.config import Settings
 from ..core.keys import RedisKeys
+from ..middleware.observability import current_request_id
 from .event_envelope import decode_fields, encode_payload
 
 __all__ = ["AIEngineClient"]
 
 #: job / result 流的保留上限（与 ai-engine 侧 ``AI_ENGINE_STREAM_MAXLEN_JOB`` 默认值一致）
 _STREAM_MAXLEN = 10000
+
+
+def _current_request_id() -> str:
+    """取当前 HTTP 请求的关联 ID（非请求上下文返回空串）。
+
+    为什么要跨模块取: ``middleware/observability`` 用 ContextVar 持有它（请求内任意深度可读），
+    在这里入队时把它写进载荷，后续 ai-engine / result 消费器的日志就能与这条 HTTP 请求对上。
+    """
+    try:
+        return current_request_id()
+    except Exception:  # noqa: BLE001 取 ID 失败绝不能影响投递
+        return ""
 
 
 class AIEngineClient:
@@ -70,13 +83,20 @@ class AIEngineClient:
 
         返回:
             消息 ID（str）。
+        说明:
+            载荷带 ``request_id``（若调用方处于 HTTP 请求上下文）—— 一次生成要跨
+            backend → Redis → ai-engine 三段日志，这个 ID 是唯一能把三段串起来的东西。
+            取不到（后台任务/测试直调）就不带该字段（ai-engine 侧宽容读取）。
         """
+        request_id = _current_request_id()
         payload = {
             "thread_id": str(thread_id),
             "product_id": str(product_id),
             "org_id": str(org_id),
             "rules": rules,
         }
+        if request_id:
+            payload["request_id"] = request_id
         return self._xadd(self._keys.job_generate(), payload)
 
     def resume_approval(
@@ -99,7 +119,6 @@ class AIEngineClient:
     def trigger_product_purge(self, *, product_id: str, org_id: str) -> str:
         """投递商品彻底删除任务（**必须在 products 行删除并 commit 之后调用**，见模块 docstring）。"""
         return self._xadd(self._keys.job_product_purge(), {"product_id": str(product_id), "org_id": str(org_id)})
-
     def _xadd(self, stream: str, payload: dict[str, Any]) -> str:
         """统一落盘（信封注入 + MAXLEN 近似裁剪）。
 

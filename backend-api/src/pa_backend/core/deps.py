@@ -103,8 +103,11 @@ def require_roles(*roles: str):
     返回:
         依赖函数（``Depends(require_roles("admin"))`` 使用）。
     注意:
-        角色判断只看**服务端 claims**；``role`` 是登录时写进 JWT 的，改角色需重新登录
-        （或等 access 过期），这是刻意的取舍：避免每次请求再查一次角色表。
+        角色判断用的是 ``CurrentUser.role``，而它来自**每次请求查库得到的 ``sys_users.role``**
+        （``get_current_user`` 里赋值），不是 JWT 里的 ``role`` claim。这条口径与
+        「停用用户立即失效」同一取舍：**改角色立即生效**，代价是每请求一次索引查询。
+        因此测试里要验证「非 admin 被拒」，必须造**库里真是该角色**的用户
+        （只改 token claim 无效 —— 见 ``tests/test_members_rbac.py`` 的做法）。
     """
 
     async def _guard(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:

@@ -50,7 +50,10 @@ async def test_trigger_generation_advances_state_and_enqueues_snapshot(
 ):
     """触发生成：商品转 generating + job(running) + 流里带 rules 快照（信封首键 schema_version）。"""
     _drain_job_stream(settings)
-    resp = await client.post(GENERATE_URL.format(product_id=seeded_org.product_id), headers=auth_headers)
+    resp = await client.post(
+        GENERATE_URL.format(product_id=seeded_org.product_id),
+        headers={**auth_headers, "X-Request-Id": "req-trace-0001"},
+    )
     assert resp.status_code == 200, resp.text
     thread_id = resp.json()["data"]["thread_id"]
 
@@ -67,6 +70,9 @@ async def test_trigger_generation_advances_state_and_enqueues_snapshot(
     assert payload["thread_id"] == thread_id
     assert payload["product_id"] == seeded_org.product_id
     assert payload["org_id"] == seeded_org.org_id
+    # 请求关联 ID（P8）：把「这次 HTTP 触发」与后续 ai-engine / result 消费日志串起来。
+    # 必须等于请求头（前端注入 X-Request-Id）——否则跨进程排查时对不上号。
+    assert payload["request_id"] == "req-trace-0001"
     # rules 快照键名必须与 compile_rules_snapshot 读取的键一致
     assert set(payload["rules"]) == {"words", "rules"}
     words = {item["word"] for item in payload["rules"]["words"]}

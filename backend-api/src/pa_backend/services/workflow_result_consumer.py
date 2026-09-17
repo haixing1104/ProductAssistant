@@ -153,6 +153,12 @@ class WorkflowResultConsumer:
                     session, job=job, product=product, payload=payload, thread_id=thread_id
                 )
             await session.commit()
+            # 收口日志：带 request_id（若 ai-engine 回传）→ 一次生成的三段日志可据此串起来
+            print(
+                f"[result-consumer] result={result} thread={str(thread_id)[:8]} "
+                f"product={product_id} → job={job_status} product={product_status} "
+                f"request_id={payload.get('request_id') or '-'}"
+            )
         return True
 
     async def _create_pending_approval(

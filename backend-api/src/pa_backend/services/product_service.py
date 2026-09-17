@@ -33,6 +33,7 @@ from ..repositories.compliance import ComplianceRepo
 from ..repositories.products import ProductRepo
 from .ai_engine_client import AIEngineClient, new_thread_id
 from .csv_import import parse_products_csv
+from .generation_job_reaper import is_stale, terminalize
 from .oss import OssStorage, build_oss_storage
 
 __all__ = ["ProductService"]
@@ -212,10 +213,12 @@ class ProductService:
         返回:
             新建的 ``GenerationJob``（``running``）。
         异常:
-            ApiError: 404（不存在/越权）、409（商品已删除/归档、已有进行中任务）、
+            ApiError: 404（不存在/越权）、409（商品已删除/归档、已有**仍在处理中**的任务）、
                 503（投递失败 —— 此时状态已回滚为 ``draft``，可安全重试）。
         步骤（顺序即语义，见模块 docstring）:
             ① 商品必须可作业（非 deleted/archived），且没有进行中的任务（防重复扣费）；
+               例外的**守卫宽容**：进行中的任务若已超期僵死（``job_stale_minutes``），
+               先就地回收（job→failed、商品→draft）再继续 —— 否则卡死的任务会让商品永久 409；
             ② 生成新 ``thread_id``（幂等锚点）→ 建 job(running) + 商品 ``generating`` + 绑定线程；
             ③ **入队瞬间固化 rules 快照**（含时效过滤；ai-engine 侧不做时间判断）；
             ④ commit 后再投递；投递失败则回滚状态并报 503。
@@ -225,7 +228,19 @@ class ProductService:
             raise ApiError(409, "已删除或归档的商品不能触发生成")
         running = await self.active_job(product)
         if running is not None:
-            raise ApiError(409, f"该商品已有进行中的生成任务（thread_id={running.thread_id}）")
+            # **守卫宽容**：只有「仍在正常处理窗口内」的任务才拦。
+            # 卡死的 job（worker 被杀/消息丢失/图挂起）会让该商品**永久** 409，而前端按钮也按
+            # status 禁用 → 用户既点不动也无法重试，只能改库（2026-09 实测踩到）。
+            # 因此对「已确认僵死」的任务就地回收（job→failed、商品→draft），继续本次触发。
+            if is_stale(running, stale_minutes=self.settings.job_stale_minutes):
+                reaped = await terminalize(self.session, running)
+                print(
+                    f"[backend] 守卫宽容：回收僵死任务 thread={reaped['thread_id'][:8]} "
+                    f"product={reaped['product_id']}（超期 > {self.settings.job_stale_minutes}min），放行本次触发"
+                )
+                await self.session.flush()
+            else:
+                raise ApiError(409, f"该商品已有进行中的生成任务（thread_id={running.thread_id}）")
 
         thread_id = uuid.UUID(new_thread_id())
         job = GenerationJob(

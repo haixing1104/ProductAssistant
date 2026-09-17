@@ -24,3 +24,17 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     }),
   });
 }
+
+// antd 的 Modal / TextArea 走 @rc-component/resize-observer，jsdom 未实现 ResizeObserver：
+// 不补会直接抛 `ReferenceError: ResizeObserver is not defined`（弹窗一渲染就炸）。
+if (typeof window !== "undefined" && !("ResizeObserver" in window)) {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  Object.defineProperty(window, "ResizeObserver", {
+    writable: true,
+    value: ResizeObserverStub,
+  });
+}

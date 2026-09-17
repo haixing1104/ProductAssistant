@@ -47,6 +47,7 @@ import time
 import redis
 
 from ..adapters.redis_eventbus import RedisKeys
+from .logging_setup import configure_logging, log
 from .worker import ListingWorker, _default_consumer_name
 
 
@@ -106,7 +107,7 @@ def _env_int(name: str, default: int) -> int:
     try:
         return int(raw.strip())
     except ValueError:
-        print(f"[worker] 环境变量 {name}={raw!r} 不是整数，回落到默认值 {default}")
+        log(f"[worker] 环境变量 {name}={raw!r} 不是整数，回落到默认值 {default}")
         return default
 
 
@@ -116,6 +117,8 @@ def main() -> None:
     异常:
         SystemExit: 运行期 DSN 既不显式配置也无法从 POSTGRES_* / ROLE_PA_AI_PWD 拼装。
     """
+    # 最早处装配日志：此后所有 log()/logger.* 都带时间戳（跨进程排查的第一需求）
+    configure_logging()
     env = os.getenv("PA_ENV", "dev")
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     rule_precheck = os.getenv("AI_ENGINE_RULE_PRECHECK", "0").lower() in {"1", "true", "yes"}
@@ -149,7 +152,7 @@ def main() -> None:
         )
     if not setup_dsn:
         # 建表是一次性动作：生产可只给运行期 DSN（表由发布流程/迁移预先建好）
-        print("[worker] 未提供 AI_ENGINE_SETUP_PG_DSN：跳过 checkpoint 建表（假定表已存在）")
+        log("[worker] 未提供 AI_ENGINE_SETUP_PG_DSN：跳过 checkpoint 建表（假定表已存在）")
 
     client = redis.Redis.from_url(
         redis_url,
@@ -172,14 +175,14 @@ def main() -> None:
     # 启动提示是刻意的（可观测性）：默认开之后必须让人知道 Agent 在跑、预算多少、如何关。
     agent_runtime = build_agent_runtime_from_env() if agent_enabled else None
     if not agent_enabled:
-        print("[worker] Agent 研究已关闭（AI_ENGINE_AGENT_ENABLED=0）→ agent_research 节点 no-op")
+        log("[worker] Agent 研究已关闭（AI_ENGINE_AGENT_ENABLED=0）→ agent_research 节点 no-op")
     elif agent_runtime is None:
-        print(
+        log(
             "[worker] Agent 研究已启用但无可用 LLM 凭据 → 节点将 no-op"
             "（需 ZHIPU_API_KEY；如需显式关闭请设 AI_ENGINE_AGENT_ENABLED=0）"
         )
     else:
-        print(
+        log(
             f"[worker] Agent 研究已启用（max_turns={agent_max_turns}, "
             f"max_tool_calls={agent_max_tool_calls}）；如需关闭请设 AI_ENGINE_AGENT_ENABLED=0"
         )
@@ -209,12 +212,12 @@ def main() -> None:
         done_ttl_seconds=done_ttl_seconds,
         heartbeat_ttl_seconds=heartbeat_ttl_seconds,
     )
-    print(
+    log(
         f"[worker] env={env} redis={redis_url} consumer={consumer} 开始消费 "
         "job:generate / job:approval / job:product_purge（Ctrl+C 退出）"
     )
     # 可靠性参数刻意打印：默认开的能力必须让人一眼看到生效值与调参入口（同 Agent 日志的取舍）
-    print(
+    log(
         f"[worker] 可靠性：PEL 回收(空闲>{pel_min_idle_ms}ms, 单批{pel_claim_batch}) "
         f"死信阈值={max_deliveries} 线程锁={job_lock_ttl_seconds}s "
         f"流保留(job={stream_maxlen_job}, evt={stream_maxlen_evt}, evt_ttl={evt_ttl_seconds}s) "
@@ -249,25 +252,25 @@ def main() -> None:
                 worker.consume_approval_once(block_ms=1000)
                 worker.consume_product_purge_once(block_ms=1000)
             except Exception as exc:  # noqa: BLE001 基础设施异常跳过本轮，消息仍在流中可重投
-                print(f"[worker] 消费异常（跳过本轮）: {exc!r}")
+                log(f"[worker] 消费异常（跳过本轮）: {exc!r}")
             # 心跳：让外部能区分「进程活着」与「消费停滞」（键随 TTL 过期即代表停滞）
             try:
                 worker.heartbeat()
             except Exception as exc:  # noqa: BLE001 心跳失败不影响消费主流程
-                print(f"[worker] 心跳刷新失败（忽略）: {exc!r}")
+                log(f"[worker] 心跳刷新失败（忽略）: {exc!r}")
             # 周期性待处理读数（每 20 轮 ≈ 1 分钟）：pending 持续增长 = 消费能力不足或消息卡死
             if loop_count % 20 == 0:
                 try:
-                    print(f"[worker] 待处理读数 {worker.pending_stats()}")
+                    log(f"[worker] 待处理读数 {worker.pending_stats()}")
                 except Exception as exc:  # noqa: BLE001 观测失败不影响消费
-                    print(f"[worker] 待处理读数失败（忽略）: {exc!r}")
+                    log(f"[worker] 待处理读数失败（忽略）: {exc!r}")
             # 空轮询轻量退避，避免空转打满 CPU
             time.sleep(0.1)
     finally:
         # 先放 checkpointer 连接池再关 Redis：进程退出前释放全部外部连接
         worker.close()
         client.close()
-        print("[worker] 已优雅关闭")
+        log("[worker] 已优雅关闭")
 
 
 if __name__ == "__main__":

@@ -104,6 +104,14 @@ class Settings(BaseSettings):
         default="http://localhost:5173", validation_alias="BACKEND_FRONTEND_PUBLIC_BASE_URL"
     )
 
+    # --- 生成任务僵死回收（reaper）---
+    # 卡在 running 的任务会永久 409（前端按钮也不可点）→ 超期即判死并放行商品（见 services.generation_job_reaper）
+    job_stale_minutes: int = Field(default=15, validation_alias="BACKEND_JOB_STALE_MINUTES")
+    job_reaper_interval_seconds: int = Field(default=60, validation_alias="BACKEND_JOB_REAPER_INTERVAL_SECONDS")
+
+    # --- 日志（访问日志/业务日志的级别；修复「root logger 无 handler → INFO 被丢弃」）---
+    log_level: str = Field(default="INFO", validation_alias="BACKEND_LOG_LEVEL")
+
     @model_validator(mode="after")
     def _fill_database_url(self) -> "Settings":
         """``BACKEND_PG_DSN`` 缺省时按 POSTGRES_* + 角色密码派生（见模块 docstring）。"""

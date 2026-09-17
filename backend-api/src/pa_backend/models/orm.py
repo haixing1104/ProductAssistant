@@ -210,6 +210,29 @@ class DeleteAudit(Base):
 # ======================= schema_pa_ai（ai-engine 域；backend **只读** 两表）=======================
 
 
+class JobAbortAudit(Base):
+    """运维手工终止生成任务的审计（``0005_job_abort_audit.sql``）。
+
+    权限：``role_pa_backend`` 仅 **SELECT/INSERT**（0005 显式 REVOKE UPDATE/DELETE）
+    —— 与 ``delete_audits`` 同一红线：审计只能追加。本模型**只用于插入与查询**。
+
+    存在的理由：卡死的生成任务过去只能改库且不留痕；本表记录「谁/何时/为什么」终止了哪个任务。
+    """
+
+    __tablename__ = "job_abort_audits"
+    __table_args__ = {"schema": SCHEMA_BACKEND}
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    job_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    thread_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    product_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    reason: Mapped[str] = mapped_column(Text)
+    aborted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
 class ProductContent(_TimestampMixin, Base):
     """AI 生成内容版本表（本模块**仅 SELECT**：版本切换与图文展示；写归 ai-engine）。"""
 

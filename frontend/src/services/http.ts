@@ -22,9 +22,25 @@ export const AUTH_EXPIRED_EVENT = "pa:auth-expired";
 /** backend refresh 的 CSRF 头（服务端要求 `x-requested-with: fetch`） */
 export const CSRF_HEADER = { "X-Requested-With": "fetch" };
 
+/**
+ * 生成本次请求的关联 ID（`X-Request-Id`）。
+ *
+ * 用途：一次「生成」要跨 backend → Redis → ai-engine 三段日志，靠时间戳猜时序很痛苦；
+ * 带上这个 ID 后，backend 会把它写进 job 载荷并一路透传到 worker/result 日志。
+ * 优先用 `crypto.randomUUID()`（HTTPS/现代浏览器都有），退化到随机串（老内核/测试环境）。
+ */
+export function newRequestId(): string {
+  const cryptoObj = globalThis.crypto as Crypto | undefined;
+  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
+  return `req-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+}
+
 http.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // 同一请求的重放（401 续签后重发）复用同一个 ID：config.headers 会被带走，
+  // 若没有就补一个（首次请求）。401 重放路径见下方 retryable。
+  if (!config.headers["X-Request-Id"]) config.headers["X-Request-Id"] = newRequestId();
   return config;
 });
 

@@ -8,6 +8,11 @@
 //   · 图片上传：`POST /oss/presign` 需要 product_id → 三步（换 URL → 浏览器 PUT → PATCH 整体覆盖 raw_images）；
 //   · 流可重连：服务端空闲关流（注释帧）→ 连接器自动带 Last-Event-ID 续连；
 //     `hitl.waiting` 是**终态**（等待审批可能数小时）→ 停止，审批后回来点「连接实时流」即可。
+//   · **重开流必须换 key**（历史事故，勿改回）：连接器命中终态/ready 后即 `stopped` 且**不会自己复活**，
+//     而 `streamOn` 常常在进页面时就已经是 true（有活跃任务 / 用户点过「连接实时流」）
+//     → 此时 `setStreamOn(true)` 是 no-op：不重渲染、不重挂载、不会再建连接。
+//     新任务的 `done` 事件因此永远无人接收 → 按钮永久停在「生成中…」（本次修的 bug）。
+//     解法：`streamNonce` 参与 `StreamingDisplay` 的 key 强制重挂载；另有「仅在生成中轮询」兜底。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
@@ -43,9 +48,28 @@ import {
   stockStatusLabel,
 } from "../services/productMeta";
 import { canWriteProducts, useAuthStore } from "../store/authStore";
-import type { Approval, ContentVersion } from "../types/api";
+import type { Approval, ContentVersion, Product } from "../types/api";
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+/**
+ * 详情查询的兜底轮询策略（导出便于单测，与 ``pages/OpsPage.heartbeatMeta`` 同一做法）。
+ *
+ * 为什么需要它：SSE 是状态推进的主通道，但**它可能断**（网络抖动 / 后端重启 / 票据重试耗尽 /
+ * 服务端因 ready 提前关流）。没有兜底时按钮会永远停在「生成中…」直到手动刷新页面
+ * （2026-09 事故的另一半成因）。只在「进行中」时轮询，终态后立即停（返回 false）。
+ *
+ * 参数:
+ *   current: 详情接口返回的商品（可能还没加载出来）。
+ * 返回:
+ *   5000（进行中：``generating`` 或仍有 ``active_job_status``）或 false（不再轮询）。
+ */
+export function detailRefetchInterval(current?: Product): number | false {
+  const inFlight = Boolean(
+    current && (current.status === "generating" || current.active_job_status),
+  );
+  return inFlight ? 5000 : false;
+}
 
 export default function ProductDetailPage() {
   const { productId = "" } = useParams();
@@ -53,6 +77,9 @@ export default function ProductDetailPage() {
   const role = useAuthStore((s) => s.user?.role);
   const writable = canWriteProducts(role);
   const [streamOn, setStreamOn] = useState(false);
+  // 「重开流」的强制开关：连接器一旦 stopped 就不会自己复活，而 streamOn 很可能一直是 true
+  // → 用自增 nonce 参与 StreamingDisplay 的 key（nonce 变 = 组件重挂载 = 新建 SSE 连接）。
+  const [streamNonce, setStreamNonce] = useState(0);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -60,6 +87,10 @@ export default function ProductDetailPage() {
     queryKey: ["product", productId],
     queryFn: () => productsApi.get(productId),
     enabled: productId.length > 0,
+    // 兜底轮询（**仅进行中**，5s 一次）：SSE 是主通道，但它可能断（网络抖动 / 后端重启 /
+    // 票据重试耗尽 / 服务端 ready 提前关流）。没有这层兜底时，按钮会一直停在「生成中…」
+    // 直到手动刷新页面 —— 正常终态后这里会自动停（status 不再是 generating 且无 active_job）。
+    refetchInterval: (query) => detailRefetchInterval(query.state.data as Product | undefined),
   });
   const product = detail.data;
 
@@ -93,7 +124,12 @@ export default function ProductDetailPage() {
     mutationFn: () => productsApi.generate(productId),
     onSuccess: (result) => {
       message.success(`已触发生成（任务 ${result.thread_id.slice(0, 8)}…），可实时查看过程`);
+      // 关键：**必须让流重开**。streamOn 很可能已经是 true（进页面时有活跃任务，或用户先点过
+      // 「连接实时流」）——此时 setStreamOn(true) 是 no-op，组件不重挂载，而它的连接器早已因
+      // 服务端 ready/终态而 stopped：新任务的 done 事件无人接收 → 按钮永久「生成中…」。
+      // 因此这里额外 bump nonce（参与 StreamingDisplay 的 key）强制重挂载。
       setStreamOn(true);
+      setStreamNonce((n) => n + 1);
       qc.invalidateQueries({ queryKey: ["product", productId] });
     },
     onError: (e) => message.error(apiErrorMessage(e, "触发生成失败")),
@@ -248,10 +284,16 @@ export default function ProductDetailPage() {
           }
         >
           <StreamingDisplay
+            // key 里带线程与 nonce：新一轮生成 / 手动重连都会**重挂载**（= 新建 SSE 连接）。
+            // 只靠 streamOn 布尔量无法重开 —— 连接器一旦 stopped 就不会自己复活。
+            key={`${productId}:${product.active_thread_id ?? "none"}:${streamNonce}`}
             productId={productId}
             onDone={refreshAfterStream}
             onWaiting={refreshAfterStream}
             onTerminal={() => refreshAfterStream()}
+            // 服务端回 ready（它认为没有进行中任务）时也刷新一次：这是 UI 与后端状态纠偏的机会
+            // （例如任务其实早已结束，只是本页的流断了）。
+            onNoActiveTask={refreshAfterStream}
           />
         </Card>
       ) : null}

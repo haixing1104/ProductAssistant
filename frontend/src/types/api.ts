@@ -292,6 +292,39 @@ export interface OpsOverview {
   stalled: boolean;
   streams: StreamOverview[];
   dlq: DlqSummary[];
+  /** 卡住的生成任务（超期未推进，判据与后端 reaper 同源）→ 提供「终止」入口 */
+  stuck_jobs: StuckJob[];
+}
+
+/**
+ * 卡住的生成任务（后端 `/ops/overview` 的 `stuck_jobs`）。
+ *
+ * 为什么要有这一项：卡在 running 的任务会让商品**永久 409**（详情页按钮也变成不可点），
+ * 过去只能人肉改库；有了这份清单，运维可以「看见 → 立刻终止」（写审计）。
+ */
+export interface StuckJob {
+  job_id: string;
+  thread_id: string;
+  product_id: string;
+  sku_code?: string | null;
+  product_status?: string | null;
+  job_status?: string;
+  /** 距今多久没推进（秒） */
+  age_seconds?: number | null;
+  /** 指标级失败（单个查询失败不影响整页） */
+  error?: string;
+}
+
+/** 终止任务的结果（`POST /ops/jobs/{id}/abort`）。 */
+export interface AbortJobResult {
+  job_id: string;
+  thread_id: string;
+  product_id: string;
+  job_status: string;
+  product_status?: string | null;
+  /** 是否同时把商品放回 draft（False = 商品已被更新的线程接管，只收口了任务） */
+  product_released: boolean;
+  already_terminal: boolean;
 }
 
 export interface DlqEntry {

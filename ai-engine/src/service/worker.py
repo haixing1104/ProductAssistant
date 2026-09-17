@@ -52,6 +52,7 @@ from ..workflowcore.agent.middleware import DEFAULT_MAX_TOOL_CALLS, DEFAULT_MAX_
 from ..workflowcore.graph import build_workflow, close_pg_checkpointer, new_pg_checkpointer
 from ..workflowcore.node.node_conditions import is_high_value_product
 from ..ports import BLOCKING_SEVERITIES, ObjectStorageServer
+from .logging_setup import log
 
 
 logger = logging.getLogger(__name__)
@@ -339,7 +340,7 @@ class ListingWorker:
                     count=self.pel_claim_batch,
                 )
             except redis.exceptions.RedisError as exc:
-                print(f"[worker] PEL 回收失败（本轮跳过，不影响取新消息）: {exc!r}")
+                log(f"[worker] PEL 回收失败（本轮跳过，不影响取新消息）: {exc!r}")
                 claimed = []
             for msg_id, payload, raw in claimed:
                 pulled = self._handle_claimed(
@@ -361,7 +362,7 @@ class ListingWorker:
                 raw=exc.raw,
                 maxlen=self.stream_maxlen_job,
             )
-            print(f"[worker] 收到无法解析的消息，已转死信 {stream} {exc.msg_id}")
+            log(f"[worker] 收到无法解析的消息，已转死信 {stream} {exc.msg_id}")
             return None
         if msg is None:
             return None  # 空轮询（XREADGROUP 超时）：正常，非错误
@@ -408,12 +409,12 @@ class ListingWorker:
                 raw=raw,
                 maxlen=self.stream_maxlen_job,
             )
-            print(f"[worker] 滞留消息无法解析，已转死信 {stream} {msg_id}")
+            log(f"[worker] 滞留消息无法解析，已转死信 {stream} {msg_id}")
             return None
         deliveries = self.streams.deliveries_of(stream, msg_id, group=self.group)
         thread_id = payload.get("thread_id")
         if has_thread_lock and thread_id and self.streams.lock_exists(thread_id):
-            print(
+            log(
                 f"[worker] 滞留消息仍在处理中（锁存在），本轮不接管 {stream} {msg_id} "
                 f"交付次数={deliveries}"
             )
@@ -429,9 +430,9 @@ class ListingWorker:
                 payload=payload,
                 maxlen=self.stream_maxlen_job,
             )
-            print(f"[worker] 交付次数达上限（{deliveries}），已转死信 {stream} {msg_id}")
+            log(f"[worker] 交付次数达上限（{deliveries}），已转死信 {stream} {msg_id}")
             return None
-        print(f"[worker] 回收滞留消息并重试 {stream} {msg_id} 交付次数={deliveries}")
+        log(f"[worker] 回收滞留消息并重试 {stream} {msg_id} 交付次数={deliveries}")
         return msg_id, payload, True
 
     def consume_generate_once(self, *, block_ms: int = 1000) -> str | None:
@@ -477,7 +478,7 @@ class ListingWorker:
         thread_id = data.get("thread_id")
         # ① 终态幂等：已 published 的线程直接短路（backend 重复投递 / PEL 回收重投都不再生成）
         if thread_id and self.streams.is_done(thread_id):
-            print(f"[worker] 线程已 published，跳过重复生成 thread_id={str(thread_id)[:8]}")
+            log(f"[worker] 线程已 published，跳过重复生成 thread_id={str(thread_id)[:8]}")
             self.streams.ack(self.keys.job_generate(), msg_id, group=self.group)
             return "duplicate"
         # ② 线程锁：防同一线程被并发处理（多实例部署 + 重复投递双保险）
@@ -490,12 +491,12 @@ class ListingWorker:
             if reclaimed:
                 # 回收场景：锁还在 ⇒ 原持有者可能只是慢（还没崩）。
                 # 不 ack 也不处理，留给下一轮回收（锁 TTL 过期后即可接管）—— 否则会丢任务。
-                print(
+                log(
                     f"[worker] 回收消息仍在处理中（锁未释放），本轮不接管 thread_id={str(thread_id)[:8]}"
                 )
                 return "busy"
             # 新投递场景：同一线程已在处理 = backend 重复投递 → ack 丢弃是安全的
-            print(f"[worker] 重复投递（线程已在处理），跳过 thread_id={str(thread_id)[:8]}")
+            log(f"[worker] 重复投递（线程已在处理），跳过 thread_id={str(thread_id)[:8]}")
             self.streams.ack(self.keys.job_generate(), msg_id, group=self.group)
             return "busy"
         try:
@@ -503,6 +504,12 @@ class ListingWorker:
             product = self.product_reader.read(product_id=data["product_id"], org_id=data["org_id"])
             if product is None:
                 return "missing_product"
+            # 请求关联 ID（可选）：把这条 worker 日志与 backend 那次 HTTP 触发请求串起来
+            request_id = data.get("request_id") or "-"
+            log(
+                f"[worker] 开始生成 thread_id={str(data['thread_id'])[:8]} "
+                f"product={data['product_id']} request_id={request_id}"
+            )
             # 输入素材预检：商品标题含阻断级违禁词 → 不浪费一次注定违规的生成
             if engine is not None and self.rule_precheck:
                 blocked = [
@@ -510,7 +517,7 @@ class ListingWorker:
                 ]
                 if blocked:
                     reasons = [h.reason or h.keyword for h in blocked]
-                    print(f"[worker] 输入素材命中违禁词，阻止生成 thread_id={str(data['thread_id'])[:8]}: {reasons}")
+                    log(f"[worker] 输入素材命中违禁词，阻止生成 thread_id={str(data['thread_id'])[:8]}: {reasons}")
                     self._publish(
                         data["thread_id"],
                         {
@@ -612,7 +619,7 @@ class ListingWorker:
             # 若收到孤儿消息（商品行仍存在 = 删除并未生效，如旧版本同事务先 XADD 后 commit 回滚），
             # 物理清 pa_ai 会造成数据丢失，必须中止并 ack 丢弃。
             if self.product_reader.read(product_id=product_id, org_id=org_id) is not None:
-                print(
+                log(
                     f"[worker] purge 中止：商品仍存在（疑似孤儿 purge 消息）org={org_id} "
                     f"product={product_id}，跳过清理"
                 )
@@ -635,8 +642,8 @@ class ListingWorker:
                         saver.delete_thread(thread_id)
                         removed_ckpt += 1
                 except Exception as exc:  # noqa: BLE001 清理失败不阻断本任务终态
-                    print(f"[worker] checkpoint 清理失败（忽略）: {exc!r}")
-            print(
+                    log(f"[worker] checkpoint 清理失败（忽略）: {exc!r}")
+            log(
                 f"[worker] 已物理清理 pa_ai org={org_id} product={product_id} "
                 f"(contents={removed_c}, logs={removed_e}, threads={removed_ckpt})"
             )
@@ -645,14 +652,14 @@ class ListingWorker:
             #    白名单校验拦下而静默不删（对象残留）。
             if self.object_storage is not None and image_urls:
                 deleted = self.object_storage.delete_urls(image_urls)
-                print(f"[worker] OSS 图片清理 product={product_id}: targets={len(image_urls)} deleted={deleted}")
+                log(f"[worker] OSS 图片清理 product={product_id}: targets={len(image_urls)} deleted={deleted}")
             # ③ 向量库 best-effort 清理：删除该商品全部文案向量（RAG 可选，失败不影响 purge）
             if self.rag_store is not None:
                 try:
                     removed_v = self.rag_store.delete_by_product(org_id=org_id, product_id=product_id)
-                    print(f"[worker] Milvus 向量清理 product={product_id}: removed={removed_v}")
+                    log(f"[worker] Milvus 向量清理 product={product_id}: removed={removed_v}")
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[worker] Milvus 向量清理失败（忽略）: {exc!r}")
+                    log(f"[worker] Milvus 向量清理失败（忽略）: {exc!r}")
             return "purged"
         finally:
             self.streams.ack(self.keys.job_product_purge(), msg_id, group=self.group)
@@ -695,11 +702,11 @@ class ListingWorker:
         token = self.streams.acquire_lock(thread_id, ttl_seconds=self.approval_lock_ttl_seconds)
         if token is None:
             if reclaimed:
-                print(
+                log(
                     f"[worker] 回收的审批消息仍在恢复中（锁未释放），本轮不接管 thread_id={str(thread_id)[:8]}"
                 )
                 return "busy"
-            print(f"[worker] 审批恢复已被他处持锁，跳过 thread_id={str(thread_id)[:8]}")
+            log(f"[worker] 审批恢复已被他处持锁，跳过 thread_id={str(thread_id)[:8]}")
             self.streams.ack(self.keys.job_approval(), msg_id, group=self.group)
             return "busy"
         try:
@@ -754,19 +761,19 @@ class ListingWorker:
             因为本函数处于异常处理路径上，再抛会掩盖原始异常。
         """
         thread_id = data.get("thread_id")
-        print(f"[worker] {stage} 任务失败 thread_id={str(thread_id or '')[:8]}: {exc!r}")
+        log(f"[worker] {stage} 任务失败 thread_id={str(thread_id or '')[:8]}: {exc!r}")
         try:
             self._publish(
                 thread_id,
                 {"type": "failed", "data": {"product_id": data.get("product_id"), "org_id": data.get("org_id")}},
             )
         except Exception as pub_exc:  # noqa: BLE001 事件发布失败不阻断 ack
-            print(f"[worker] 发布 failed 事件失败: {pub_exc!r}")
+            log(f"[worker] 发布 failed 事件失败: {pub_exc!r}")
         try:
             if data.get("product_id") and data.get("org_id"):
                 self._publish_outcome(data, "failed")
         except Exception as pub_exc:  # noqa: BLE001
-            print(f"[worker] 发布 failed 结果失败: {pub_exc!r}")
+            log(f"[worker] 发布 failed 结果失败: {pub_exc!r}")
 
     def _publish(self, thread_id: str, payload: dict) -> None:
         """写入 evt:{thread_id}（供 SSE 回放/实时尾随；worker 侧不依赖 EventBus 实例）。
@@ -809,6 +816,11 @@ class ListingWorker:
         }
         if content_snapshot is not None:
             fields["content_snapshot"] = content_snapshot
+        # 回传 backend 的请求关联 ID（可选字段）：backend 侧消费日志据此与「触发那次生成」的
+        # HTTP 请求对齐 —— 一次生成跨三段日志（backend → Redis → ai-engine），这是唯一的串接手段
+        request_id = data.get("request_id")
+        if request_id:
+            fields["request_id"] = request_id
         self.streams.xadd(
             self.keys.workflow_result(),
             fields,

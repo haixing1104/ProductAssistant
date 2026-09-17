@@ -11,7 +11,8 @@
 三个常驻任务（lifespan 内启动，仅在非测试环境）:
     · ``WorkflowResultConsumer``：消费 ``result:workflow`` 推进状态机（核心闭环）；
     · ``OutboxDeliverer``：投递审批通知（outbox → 钉钉/控制台）；
-    · ``ApprovalRedriveWatchdog``：补投悬挂的审批 resume（下游抖动兜底）。
+    · ``ApprovalRedriveWatchdog``：补投悬挂的审批 resume（下游抖动兜底）；
+    · ``GenerationJobReaper``：回收僵死的生成任务（卡住的 job 会让商品永久 409、按钮不可点）。
     测试环境（``PA_ENV=test``）**不启动**：用例直接调用它们的单次处理方法，
     否则用例之间会互相抢消息（与 ProductPilot 同一取舍）。
 
@@ -33,10 +34,12 @@ from starlette.responses import JSONResponse
 from .core.config import Settings, get_settings
 from .core.db import create_engine_and_session
 from .core.errors import envelope, install_exception_handlers
+from .core.logging import configure_logging
 from .core.redis_client import new_async_redis
 from .middleware.observability import RequestContextMiddleware
 from .routers import ALL_ROUTERS
 from .services.approval_watchdog import ApprovalRedriveWatchdog
+from .services.generation_job_reaper import GenerationJobReaper
 from .services.notifications.deliverer import OutboxDeliverer
 from .services.notifications.resolver import build_senders, resolve_channels
 from .services.workflow_result_consumer import WorkflowResultConsumer
@@ -53,6 +56,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         配置完成的 FastAPI 实例。
     """
     settings = settings or get_settings()
+    # 最早处装配日志：否则 root logger 无 handler → ``pa_backend.access`` 的 INFO 访问日志
+    # 会被 lastResort 静默丢弃，且所有日志没有时间戳（见 core/logging.py 的说明）
+    configure_logging(settings)
     engine, session_factory = create_engine_and_session(settings)
 
     @asynccontextmanager
@@ -69,11 +75,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session_factory, settings=settings, senders=build_senders(settings, channels)
             )
             watchdog = ApprovalRedriveWatchdog(session_factory, settings=settings)
+            reaper = GenerationJobReaper(session_factory, settings=settings)
             print(
                 f"[backend] env={settings.env} 启动常驻任务：result 消费器 / 通知投递器"
-                f"（渠道={list(channels)}）/ 审批补投守护"
+                f"（渠道={list(channels)}）/ 审批补投守护 / 僵死任务回收"
             )
-            for runner in (consumer.run, deliverer.run, watchdog.run):
+            for runner in (consumer.run, deliverer.run, watchdog.run, reaper.run):
                 stop = asyncio.Event()
                 stops.append(stop)
                 tasks.append(asyncio.create_task(runner(stop)))
