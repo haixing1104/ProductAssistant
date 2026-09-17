@@ -1,0 +1,75 @@
+# =============================================================================
+# ProductAssistant | infra/docker-compose.redis-prod.yml
+# 用途    : 生产 Redis 的独立编排（**自建 Redis** 时使用；用云托管 Redis 不需要本文件）
+# 使用    : REDIS_PASSWORD=<强口令> docker compose --env-file infra/.env \
+#             -f infra/docker-compose.redis-prod.yml up -d
+# 关系    : 与开发用的 infra/docker-compose.yml **刻意分开** —— 开发实例是「裸 Redis、无密码、
+#           单实例、暴露宿主端口」，直接拿它上生产等于把任务队列挂在无鉴权端口上。
+#
+# ⚠️ 关键取舍（改错会丢任务，不是性能问题）:
+#   · maxmemory-policy=noeviction —— 队列与事件流**绝不能被淘汰**。用 allkeys-lru 会在内存吃紧时
+#     静默丢任务；宁可 XADD 写失败（上游立刻可见、可告警）也不要静默丢消息。
+#   · appendonly yes + appendfsync everysec —— 崩溃最多丢 1 秒写入；要求零丢失改成 always（性能代价大）。
+#   · 不映射宿主端口 —— 只挂内部网络，由 backend / ai-engine 通过服务名访问；
+#     确需跨机访问时上 TLS + 防火墙白名单，绝不暴露公网。
+#   · 高危命令禁用 —— FLUSHALL / FLUSHDB / CONFIG / KEYS 在「队列实例」上没有正当用途，
+#     误调用一次即全量丢数据。需要更细粒度隔离时改用 ACL（按 key 前缀 pa:{env}:* 授权，见 docs）。
+#
+# 配套文档: infra/docs/redis-production.md（托管 Redis 清单 / 监控告警 / 备份与演练）
+# =============================================================================
+
+name: productassistant-redis-prod
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: pa-redis-prod
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?生产 Redis 必须设置 REDIS_PASSWORD（见 infra/.env.template）}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-2gb}
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - ${REDIS_APPENDFSYNC:-everysec}
+      - --rename-command
+      - FLUSHALL
+      - ""
+      - --rename-command
+      - FLUSHDB
+      - ""
+      - --rename-command
+      - CONFIG
+      - ""
+      - --rename-command
+      - KEYS
+      - ""
+    environment:
+      # 供 healthcheck 使用（容器的环境变量，不写进命令行历史）
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    volumes:
+      # 持久化目录必须挂载：容器重建后队列与事件流不能凭空消失
+      - redisproddata:/data
+    networks:
+      - pa-internal
+    # 故意不声明 ports（生产 Redis 不对宿主机/公网暴露）
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  redisproddata:
+    name: pa-redisproddata
+
+networks:
+  pa-internal:
+    name: pa-internal
+    driver: bridge
