@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "ProductAssistant",
+    "slug": "productassistant-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "productassistant",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.productassistant.mobile",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSPhotoLibraryUsageDescription": "选择商品图用于 AI 配图与人工审核",
+        "NSCameraUsageDescription": "拍摄商品图用于 AI 配图与人工审核"
+      }
+    },
+    "android": {
+      "package": "com.productassistant.mobile",
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "plugins": [
+      "expo-image-picker",
+      "expo-document-picker"
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}

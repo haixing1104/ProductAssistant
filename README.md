@@ -592,7 +592,7 @@ Redis Streams 是 backend ↔ ai-engine 的**唯一业务通道**，因此按队
 
 ##### 10) 本仓边界：哪些调用关系**还不在代码里**
 
-`mobile-rn` 目前仍是**空目录**（本仓暂不做原生端）；`frontend/`（桌面工作台，P7）与 `mobile-h5/`（移动端 H5，**本轮新增**）已落地；`backend-api` 已在 P0~P4 落地（见下方「### 五、backend-api 模块」）：
+`frontend/`（桌面工作台，P7）、`mobile-h5/`（移动端 H5，P9）与 `mobile-rn/`（移动端**原生 App**，Expo SDK 57，本轮新增）均已落地；`backend-api` 已在 P0~P4 落地（见下方「### 五、backend-api 模块」）：
 
 | 现实中应存在的一环 | 状态 | 影响 |
 |---|---|---|
@@ -602,6 +602,7 @@ Redis Streams 是 backend ↔ ai-engine 的**唯一业务通道**，因此按队
 | `hitl_approvals.content_snapshot` 落库（审批中心展示 AI 生成详情） | ✅ 已实现（`services/workflow_result_consumer._create_pending_approval`） | 列本就在 `0001_schema.sql`，无需迁移 |
 | 前端界面（React + antd） | ✅ 已实现（**P7**，`frontend/`） | 8 条路由（登录/商品/详情/审批/深链/合规/运维/成员），走 backend-api 的 43 个端点；只连 `/api/v1`（不直连 ai-engine/PG） |
 | 移动端 H5（React + antd-mobile） | ✅ 已实现（**P9**，`mobile-h5/`） | 登录 / 商品（列表+详情+SSE 实时生成）/ 审批（列表+详情+深链+批准驳回+补投）/ 我的；**与桌面端共享契约核心层**（`@pa/core` → `frontend/src/{api,services,store,types}`，页面壳各写各的）；只连 `/api/v1` |
+| 移动端原生 App（React Native + Expo） | ✅ 已实现（**P10**，`mobile-rn/`） | iOS + Android 一套代码；与 H5 的页面/组件**逐条对齐**（6 屏 + 深链），并**复用同一份契约核心层**：共享层新增「平台端口」（`frontend/src/services/platform.ts`）承载 6 个平台差异点（接口基址 / 会话回跳 / 过期事件 / 定时器 / JWT 解码 / SSE 与二进制传输），因此 `http.ts`（单飞续签 + 401 重放）与 `sse.ts`（`hitl.waiting` 终态 / `ready` 不重连 / 注释帧三态）**三端共用一份**；UI 为自研薄 UI（零 UI 依赖）；版本锁定与真机验证边界见 `mobile-rn/README.md` |
 
 **当前仓库内可独立跑通的部分**：`__main__` → worker → 图 → 节点 → 适配器 → PG/Redis/OSS/Milvus，
 以及 `tests/` 里用 `InMemorySaver` 的图级测试（207 个用例，其中 195 个纯内存可跑、12 个需容器化 PG+Redis 否则自动 skip）。
@@ -996,6 +997,7 @@ GET /api/v1/products/{id}/stream?ticket=…    ← SSE：回放 + 尾随（无�
 ./scripts/dev-down.sh        # 停四进程（容器保留）；--with-infra 连容器一起停（数据卷保留）
 ./scripts/test-frontend.sh   # 桌面端用例（自带超时与「以文件级 ✓ 判定」的收尾逻辑，见 frontend/README）
 ./scripts/test-mobile.sh     # 移动端 H5 用例（同一判定口径，见 mobile-h5/README）
+./scripts/test-mobile-rn.sh  # 移动端原生 App 用例（Jest + RNTL，同一判定口径，见 mobile-rn/README）
 ```
 
 脚本做的事（每一步都有可读输出，失败给出确切处置命令）：

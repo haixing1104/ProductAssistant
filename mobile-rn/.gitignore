@@ -1,0 +1,18 @@
+# --- 依赖与构建产物 ---
+node_modules/
+.expo/
+dist/
+coverage/
+web-build/
+
+# --- 原生工程（managed workflow：由 `npx expo prebuild` 生成，不入库）---
+ios/
+android/
+
+# --- 本机配置（含开发机局域网 IP，不入库）---
+.env
+.env.local
+
+# --- 日志 / 系统 ---
+*.log
+.DS_Store

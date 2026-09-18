@@ -1,0 +1,24 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@pa/core/*": ["../frontend/src/*"]
+    },
+    "types": ["jest", "node"]
+  },
+  "include": [
+    "index.ts",
+    "App.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "jest.setup.ts",
+    "../frontend/src/api",
+    "../frontend/src/services",
+    "../frontend/src/store",
+    "../frontend/src/types"
+  ],
+  "exclude": ["node_modules"]
+}
