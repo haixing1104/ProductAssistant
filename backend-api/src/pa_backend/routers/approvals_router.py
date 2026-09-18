@@ -60,6 +60,19 @@ def _service(request: Request, session: AsyncSession, user: CurrentUser) -> Appr
     return ApprovalService(session, user.org_id, settings=request.app.state.settings)
 
 
+def _name_lookup_org(user: CurrentUser) -> str | None:
+    """审批人名字查询的租户口径。
+
+    为什么要区分（2026-09）:
+        平台超管**跨租户**审批时，``hitl_approvals.approver_id`` 是他本人（归属平台组织），
+        而他当前的「租户」是目标租户 X —— 若仍按 X 过滤 ``sys_users``，「谁批的」会显示为空。
+        超管 → ``None``（只按 ID 查，见 ``approval_service.approver_names`` 的说明）。
+    安全:
+        非超管仍严格按 ``user.org_id`` 过滤；且名字查询的 ID 只来自**已按租户过滤**的审批行。
+    """
+    return None if user.is_superuser else user.org_id
+
+
 async def _decorate(
     session: AsyncSession,
     user: CurrentUser,
@@ -100,7 +113,7 @@ async def _service_names(session: AsyncSession, user: CurrentUser, approvals: li
     if not approvals:
         return {}
     return await approver_names(
-        session, org_id=user.org_id, approver_ids=[item.approver_id for item in approvals]
+        session, org_id=_name_lookup_org(user), approver_ids=[item.approver_id for item in approvals]
     )
 
 
@@ -246,7 +259,9 @@ async def get_approval(
     approval = await service.get_or_404(to_uuid(approval_id))
     product = await _load_product(session, approval.product_id, user.org_id)
     item = serialize_approval(approval, product)
-    names = await approver_names(session, org_id=user.org_id, approver_ids=[approval.approver_id])
+    names = await approver_names(
+        session, org_id=_name_lookup_org(user), approver_ids=[approval.approver_id]
+    )
     notify_map = await notifications_by_approval(
         session, org_id=user.org_id, approval_ids=[approval.id]
     )

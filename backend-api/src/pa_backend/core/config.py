@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     # 生产必须 1（Cookie 仅 HTTPS 回传）；本地 http 开发必须 0，否则浏览器不落 Cookie
     cookie_secure: bool = Field(default=False, validation_alias="BACKEND_COOKIE_SECURE")
 
+    # --- 自助注册（注册 = 新开租户 + 该租户首个 admin）---
+    # 默认**关闭**：公网可自助开租户等于把多租户数据面对外开放；现阶段租户/账号由运维开通
+    # （backend-api tools/seed_super_admin.py）。关闭时 POST /auth/register 直接 403。
+    # 注意：前端入口隐藏只是体验层（frontend/src/services/features.ts），**授权以本开关为准**——
+    # 只藏 UI 等于没关（curl 依然能开租户），所以两处必须同步。
+    allow_registration: bool = Field(default=False, validation_alias="BACKEND_ALLOW_REGISTRATION")
+
     # --- SSE（evt:{thread_id} 回放/尾随）---
     stream_ticket_ttl_seconds: int = Field(default=120, validation_alias="BACKEND_STREAM_TICKET_TTL_SECONDS")
     stream_idle_seconds: int = Field(default=120, validation_alias="BACKEND_STREAM_IDLE_SECONDS")

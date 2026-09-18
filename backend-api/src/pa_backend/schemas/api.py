@@ -62,12 +62,17 @@ class TokenResponse(BaseModel):
 
 
 class CurrentUserResponse(BaseModel):
-    """当前登录身份（供前端角色化 UI）。"""
+    """当前登录身份（供前端角色化 UI）。
+
+    ``is_superuser`` 为真时前端显示「组织选择器」（选中的组织走 ``X-Org-Id`` 头，
+    见 ``core/deps.SUPERUSER_ORG_HEADER``），且列表按所选组织切换。
+    """
 
     id: str
     org_id: str
     username: str
     role: str
+    is_superuser: bool = False
 
 
 class MemberCreateRequest(BaseModel):

@@ -20,6 +20,7 @@ import type {
   GenerateResult,
   Member,
   OpsOverview,
+  Org,
   PresignResult,
   Product,
   ProductWritePayload,
@@ -63,6 +64,11 @@ export const authApi = {
     ),
   me: () => unwrap<CurrentUser>(http.get("/auth/me")),
   logout: () => unwrap<Record<string, never>>(http.post("/auth/logout")),
+};
+
+/** 组织域（`GET /orgs`）：超管拿全量组织、普通 admin 只拿自己那一个（选择器数据源）。 */
+export const orgApi = {
+  list: () => unwrap<Org[]>(http.get("/orgs")),
 };
 
 /** 成员管理域（admin 专属；可创建的角色只有 reviewer/operator，见 backend `ASSIGNABLE_ROLES`）。 */

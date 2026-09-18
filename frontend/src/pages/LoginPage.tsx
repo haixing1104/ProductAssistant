@@ -1,4 +1,4 @@
-// 登录页：登录 / 注册（注册=开租户+admin）。
+// 登录页：登录（注册入口已按 `SELF_REGISTRATION_ENABLED` 关闭，见 services/features.ts）。
 //
 // PA 相对 PP 的两点差异：
 //   · **组织名可选**：PA 的用户名只在组织内唯一（`uq_sys_users_org_username`），
@@ -11,9 +11,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { authApi } from "../api";
 import { apiErrorMessage } from "../services/errors";
+import { SELF_REGISTRATION_ENABLED } from "../services/features";
 import { resetExpiredFlag, scheduleTokenRefresh } from "../services/http";
 import { getPlatform } from "../services/platform";
-import { useAuthStore } from "../store/authStore";
+import { authUserFromMe, useAuthStore } from "../store/authStore";
 
 interface FormValues {
   orgName?: string;
@@ -21,7 +22,7 @@ interface FormValues {
   password: string;
 }
 
-/** 登录 / 注册同页（`?reason=expired` 时提示会话过期并回跳原页）。 */
+/** 登录页（注册入口由 `SELF_REGISTRATION_ENABLED` 控制，当前关闭）。 */
 export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);
@@ -46,7 +47,7 @@ export default function LoginPage() {
       // 若在 /auth/me 之后才 setSession，请求会带空 token → 401（登录成功却报登录失败）
       setSession(login.access_token);
       const me = await authApi.me();
-      setSession(login.access_token, { id: me.id, org_id: me.org_id, username: me.username, role: me.role });
+      setSession(login.access_token, authUserFromMe(me));
       scheduleTokenRefresh(); // 到期前主动续签（HttpOnly refresh cookie）
       resetExpiredFlag(); // 新会话开始后允许再次触发过期提示
       const returnTo = getPlatform().takeReturnUrl() || "/";
@@ -104,9 +105,11 @@ export default function LoginPage() {
               {mode === "login" ? "登录" : "注册并登录"}
             </Button>
           </Form.Item>
-          <Button type="link" block onClick={() => setMode(mode === "login" ? "register" : "login")}>
-            {mode === "login" ? "没有账号？注册新企业" : "已有账号？去登录"}
-          </Button>
+          {SELF_REGISTRATION_ENABLED ? (
+            <Button type="link" block onClick={() => setMode(mode === "login" ? "register" : "login")}>
+              {mode === "login" ? "没有账号？注册新企业" : "已有账号？去登录"}
+            </Button>
+          ) : null}
         </Form>
       </Card>
     </div>

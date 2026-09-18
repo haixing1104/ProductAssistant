@@ -193,6 +193,20 @@ database/
 ALLOW_DESTRUCTIVE=1 ./infra/scripts/pgsql-reset.sh -f
 ```
 
+#### 引导平台超管（**自助注册默认关闭，这是唯一的进系统方式**）
+```
+cd backend-api
+set -a && . ../infra/.env && set +a
+PYTHONPATH=src python -m pa_backend.tools.seed_super_admin     # 交互输入口令（不回显）
+```
+> 会建/复用一个「平台组织」+ 一个 `is_superuser` 的 admin 账号；口令只进内存（bcrypt 后入库），
+> 不写 `.env`、不进日志。**用户名不要用 `admin`**（跨组织同名会登录 400），默认 `superadmin`。
+> 登录后界面顶部出现「组织选择器」，选中哪个租户就操作哪个租户的数据（走 `X-Org-Id` 头）。
+> 轮换口令：加 `--reset-password` 重跑。详见 `backend-api/README.md` 的「平台超管与自助注册」。
+>
+> ⚠️ 已初始化过的库要**手工**执行新增迁移 `database/sql/0007_superuser.sql`
+> （`pgsql-setup.sh init` 检测到 `role_pa_admin` 已存在即拒绝重跑）。
+
 #### 运行数据库测试（一次性容器，宿主机只需 Docker）
 ```bash
 docker compose -f infra/docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from tests

@@ -67,8 +67,25 @@ def _token_payload(user_id: str, org_id: str, role: str, settings: Settings) -> 
 
 
 @router.post("/register")
-async def register(body: RegisterRequest, session: AsyncSession = Depends(get_db)) -> dict:
-    """注册 = 创建新租户 + 该租户的首个 admin（不自动登录，前端跳登录页）。"""
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """注册 = 创建新租户 + 该租户的首个 admin（不自动登录，前端跳登录页）。
+
+    默认**关闭**（``BACKEND_ALLOW_REGISTRATION=0`` → 403）:
+        自助注册的语义是「任何人新开一个租户」，等于把多租户数据面直接对外开放；
+        现阶段租户与首个 admin 由运维开通（``tools/seed_super_admin.py``）。
+        前端隐藏入口只是体验层（``SELF_REGISTRATION_ENABLED``），**真正的门在这里** ——
+        curl 不受前端影响，所以两处必须同时改。
+    """
+    settings: Settings = request.app.state.settings
+    if not settings.allow_registration:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="自助注册已关闭，请联系管理员开通账号",
+        )
     user = await AuthService(session).register(
         org_name=body.org_name, username=body.username, password=body.password
     )
@@ -78,10 +95,18 @@ async def register(body: RegisterRequest, session: AsyncSession = Depends(get_db
 
 @router.get("/me")
 async def me(user: CurrentUser = Depends(get_current_user)) -> dict:
-    """当前登录身份（id / org_id / username / role），供前端角色化 UI。"""
+    """当前登录身份（id / org_id / username / role / is_superuser），供前端角色化 UI。
+
+    ``is_superuser`` 为客户端的**展示条件**（是否出现组织选择器）；服务端授权从不读它，
+    而是每次请求重新查库（``get_current_user``），因此不可能被客户端伪造。
+    """
     return ok(
         CurrentUserResponse(
-            id=user.id, org_id=user.org_id, username=user.username, role=user.role
+            id=user.id,
+            org_id=user.org_id,
+            username=user.username,
+            role=user.role,
+            is_superuser=user.is_superuser,
         ).model_dump()
     )
 

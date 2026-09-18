@@ -11,7 +11,8 @@
     P3：products / contents / evaluations / oss；
     P4：approvals（并把 result 消费器 / 通知投递器 / 补投守护挂进 lifespan）；
     P5：stream（SSE：票据 + 回放 + 尾随）；
-    P6（当前）：compliance（词库/规则 CRUD + 快照预览）/ ops（心跳·PEL·DLQ 只读）。
+    P6：compliance（词库/规则 CRUD + 快照预览）/ ops（心跳·PEL·DLQ 只读）；
+    P7（当前）：orgs（平台超管的组织选择器数据源；普通 admin 只见自己那一组织）。
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from .contents_router import router as contents_router
 from .evaluations_router import router as evaluations_router
 from .members_router import router as members_router
 from .ops_router import router as ops_router
+from .orgs_router import router as orgs_router
 from .oss_router import router as oss_router
 from .products_router import router as products_router
 from .stream_router import router as stream_router
@@ -34,6 +36,7 @@ __all__ = ["ALL_ROUTERS"]
 ALL_ROUTERS: list[APIRouter] = [
     auth_router,
     members_router,
+    orgs_router,
     products_router,
     contents_router,
     evaluations_router,

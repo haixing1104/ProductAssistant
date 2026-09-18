@@ -24,7 +24,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Text, Uuid, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, Text, Uuid, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -63,7 +63,14 @@ class Organization(_TimestampMixin, Base):
 
 
 class SysUser(_TimestampMixin, Base):
-    """用户主表（``role ∈ admin|reviewer|operator``；``username`` 仅**组织内**唯一）。"""
+    """用户主表（``role ∈ admin|reviewer|operator``；``username`` 仅**组织内**唯一）。
+
+    平台超管（``is_superuser``）:
+        ``org_id`` 仍是它的归属租户（平台组织，用于外键与展示），但**请求期**允许
+        由 ``X-Org-Id`` 头覆盖「当前租户」（唯一覆盖点：``core/deps.get_current_user``）
+        —— 于是所有仓储过滤/写路径自动落到目标租户，隔离红线一行不改。
+        该列只由 ``tools/seed_super_admin.py`` 写入，运行期不可经任何接口设置。
+    """
 
     __tablename__ = "sys_users"
     __table_args__ = {"schema": SCHEMA_BACKEND}
@@ -74,6 +81,7 @@ class SysUser(_TimestampMixin, Base):
     role: Mapped[str] = mapped_column(Text, default="operator")
     status: Mapped[str] = mapped_column(Text, default="active")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Product(_TimestampMixin, Base):

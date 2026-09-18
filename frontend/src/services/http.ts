@@ -10,6 +10,7 @@ import axios, { type AxiosRequestConfig } from "axios";
 import { useAuthStore } from "../store/authStore";
 
 import { AUTH_EXPIRED_EVENT, apiUrl, getPlatform } from "./platform";
+import { ORG_SCOPE_HEADER, currentOrgScope } from "./orgScope";
 
 /**
  * 全局 axios 实例（唯一出口，业务层只用 `api/index.ts` 封装的域方法）。
@@ -47,6 +48,10 @@ http.interceptors.request.use((config) => {
   config.baseURL = apiUrl("/api/v1");
   const token = useAuthStore.getState().token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  // 平台超管选中的目标租户（契约见 services/orgScope.ts）：
+  // 非超管 / 未选择组织时不发这个头 —— 请求仍在「归属组织」里执行，行为与旧版完全一致。
+  const scopeOrgId = currentOrgScope();
+  if (scopeOrgId) config.headers[ORG_SCOPE_HEADER] = scopeOrgId;
   // 同一请求的重放（401 续签后重发）复用同一个 ID：config.headers 会被带走，
   // 若没有就补一个（首次请求）。401 重放路径见下方 retryable。
   if (!config.headers["X-Request-Id"]) config.headers["X-Request-Id"] = newRequestId();

@@ -28,6 +28,22 @@ export interface CurrentUser {
   org_id: string;
   username: string;
   role: string;
+  /**
+   * 平台超管标记（`sys_users.is_superuser`）。
+   *
+   * 为真时界面显示「组织选择器」，选中的组织会作为 `X-Org-Id` 头随每个请求发出
+   * （见 `services/orgScope.ts` 与 backend `core/deps`）。**它只是展示条件**：
+   * 服务端每次都重新查库判定，客户端无法伪造。
+   */
+  is_superuser?: boolean;
+}
+
+/** 组织（租户）——`GET /orgs`；超管拿全量，普通 admin 只拿自己那一个。 */
+export interface Org {
+  id: string;
+  name: string;
+  /** `active` | `suspended`（已停用的组织不可作为切换目标） */
+  status: string;
 }
 
 /** 组织成员（`GET /users`；**绝不含** `hashed_password`）。 */

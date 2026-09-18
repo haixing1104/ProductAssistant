@@ -10,7 +10,8 @@ import { useEffect } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { authApi } from "../api";
-import { ROLE_LABEL, canApprove, isAdmin, useAuthStore } from "../store/authStore";
+import { ROLE_LABEL, authUserFromMe, canApprove, isAdmin, useAuthStore } from "../store/authStore";
+import OrgScopeSelect from "./OrgScopeSelect";
 
 const { Content, Header, Sider } = Layout;
 
@@ -31,13 +32,14 @@ export default function AppLayout() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const clear = useAuthStore((s) => s.clear);
+  const selectedOrgId = useAuthStore((s) => s.selectedOrgId);
 
   // 刷新后 token 存在但本地身份缺失时，从 /auth/me 取权威身份（角色决定菜单）
   useEffect(() => {
     if (token && !user?.username) {
       authApi
         .me()
-        .then((me) => setUser({ id: me.id, org_id: me.org_id, username: me.username, role: me.role }))
+        .then((me) => setUser(authUserFromMe(me)))
         .catch(() => {});
     }
   }, [token, user, setUser]);
@@ -73,6 +75,7 @@ export default function AppLayout() {
         >
           <Typography.Text strong>电商内容供应链工作台</Typography.Text>
           <Space>
+            <OrgScopeSelect />
             <Typography.Text type="secondary">{identity}</Typography.Text>
             <Button type="link" onClick={logout}>
               退出登录
@@ -84,7 +87,8 @@ export default function AppLayout() {
             <Alert type="warning" showIcon message="当前角色无审批权限" style={{ marginBottom: 12 }} />
           ) : null}
           {user?.role ? <Tag style={{ marginBottom: 12 }}>角色：{(ROLE_LABEL[user.role] ?? user.role)}</Tag> : null}
-          <Outlet />
+          {/* key = 当前租户：超管切换组织后**重挂载**内容区，各页面自带的「挂载即取数」自然重跑 */}
+          <Outlet key={selectedOrgId ?? "own"} />
         </Content>
       </Layout>
     </Layout>

@@ -7,13 +7,20 @@
 
 安全断言（都是「不能退化成更宽松」的红线）:
     · 用户不存在与口令错误返回**同一句话**（防账号枚举）；
-    · refresh 必须带 CSRF 头；旧 refresh 二次使用 → 整户会话吊销。
+    · refresh 必须带 CSRF 头；旧 refresh 二次使用 → 整户会话吊销；
+    · **自助注册默认关闭**（``BACKEND_ALLOW_REGISTRATION``）：403 且不落任何数据
+      （只藏前端入口等于没关 —— curl 不受 UI 影响，所以这条必须在服务端锁住）。
+
+⚠️ 夹具顺序（与 ``test_login_rate_limit`` 同一坑）:
+    ``settings`` 夹具构造时读环境变量，所以「打开注册开关」必须由**夹具**设置，
+    并声明在 ``client`` 之前（pytest 按签名顺序实例化同作用域夹具）。
 """
 
 from __future__ import annotations
 
 import uuid
 
+import pytest
 from httpx import AsyncClient
 
 from pa_backend.core.security import hash_password
@@ -27,6 +34,16 @@ CSRF = {"X-Requested-With": "fetch"}
 
 #: 与 infra/.env.template 的 BACKEND_REFRESH_COOKIE_NAME 默认值一致
 REFRESH_COOKIE = "pa_refresh"
+
+
+@pytest.fixture
+def registration_enabled(monkeypatch) -> None:
+    """打开自助注册开关（必须在 ``settings`` 构造前生效，见模块 docstring 的夹具顺序说明）。
+
+    为什么需要显式开：``BACKEND_ALLOW_REGISTRATION`` 默认 **False**（公网不开放自助开租户），
+    所以「注册能力本身」的用例必须显式打开；同时另有一条用例锁住「默认关闭 → 403」。
+    """
+    monkeypatch.setenv("BACKEND_ALLOW_REGISTRATION", "1")
 
 
 def _seed_same_username_org(backend_dsn: str, username: str, password: str) -> tuple[str, str]:
@@ -68,8 +85,23 @@ def _drop_org(backend_dsn: str, org_id: str) -> None:
     _exec(backend_dsn, "DELETE FROM schema_pa_backend.organizations WHERE id = %s", (org_id,))
 
 
-async def test_register_creates_tenant_with_admin_role(client: AsyncClient):
-    """注册即开租户：返回 user_id/org_id，且该用户是 admin（首个管理员）。"""
+async def test_register_closed_by_default(client: AsyncClient):
+    """默认关闭自助注册：403，且**没有**任何租户/账号落库（用登录反证）。
+
+    只藏前端入口不算关：``curl`` 不受 UI 影响，所以这道门必须在服务端（``auth_router.register``）。
+    """
+    username = f"closed_{uuid.uuid4().hex[:8]}"
+    payload = {"org_name": "不该被创建的租户", "username": username, "password": "Pa-Register-123"}
+    resp = await client.post(REGISTER_URL, json=payload)
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["code"] == 403
+    # 反证：若 403 之前偷偷落了库，这里会登录成功（200）
+    login = await client.post(LOGIN_URL, json={"username": username, "password": payload["password"]})
+    assert login.status_code == 401
+
+
+async def test_register_creates_tenant_with_admin_role(registration_enabled, client: AsyncClient):
+    """注册即开租户（开关打开时）：返回 user_id/org_id，且该用户是 admin（首个管理员）。"""
     username = f"owner_{uuid.uuid4().hex[:8]}"
     resp = await client.post(
         REGISTER_URL, json={"org_name": "注册回归组织", "username": username, "password": "Pa-Register-123"}
@@ -80,7 +112,7 @@ async def test_register_creates_tenant_with_admin_role(client: AsyncClient):
     assert data["org_id"] and data["user_id"]
 
 
-async def test_register_rejects_short_password(client: AsyncClient):
+async def test_register_rejects_short_password(registration_enabled, client: AsyncClient):
     """口令长度不足必须在入口被拒（400），而不是进库后才报错。"""
     resp = await client.post(
         REGISTER_URL, json={"org_name": "组织", "username": "shortpw", "password": "123"}

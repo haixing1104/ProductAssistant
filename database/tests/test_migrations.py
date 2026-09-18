@@ -3,9 +3,10 @@
 覆盖点：
   · 两个 schema 与全部表存在；
   · 0003 种子条数正确；
+  · 0007 的 ``sys_users.is_superuser`` 列存在且默认 false（平台超管的唯一标记）；
   · CHECK / UNIQUE 约束生效；
   · updated_at 触发器生效；
-  · 0002 / 0004 可重复执行（幂等）。
+  · 0002 / 0004 / 0007 可重复执行（幂等）。
 """
 from pathlib import Path
 
@@ -68,6 +69,22 @@ def test_seed_counts(superuser):
         assert actual == expected, f"{table}: 实际 {actual} 期望 {expected}"
 
 
+def test_superuser_column_exists(superuser):
+    """0007：``sys_users.is_superuser`` 存在、类型 boolean、默认 false。
+
+    为什么锁定它: 该列是**平台超管的唯一标记**（backend 据此决定是否认 ``X-Org-Id`` 头）。
+    列丢了或默认值变成 true，会让「谁能跨租户」这件事静默变形 —— 属于必须由测试守住的契约。
+    """
+    row = superuser.execute(
+        "SELECT data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema = 'schema_pa_backend' AND table_name = 'sys_users' "
+        "AND column_name = 'is_superuser'"
+    ).fetchone()
+    assert row is not None, "缺少 sys_users.is_superuser（0007_superuser.sql 未执行？）"
+    assert row[0] == "boolean", f"类型应为 boolean，实际 {row[0]}"
+    assert "false" in (row[1] or ""), f"默认值应为 false，实际 {row[1]}"
+
+
 def test_check_constraint_rejects_bad_status(superuser):
     """CHECK 约束：organizations.status 只允许 active/suspended，非法值应被拒。"""
     with pytest.raises(psycopg.errors.CheckViolation):
@@ -125,6 +142,7 @@ def test_updated_at_trigger(superuser):
 
 
 def test_migrations_reapply_is_idempotent(apply_sql_file):
-    """幂等：0002（GRANT/默认权限）与 0004（IF NOT EXISTS）重复执行不应报错。"""
+    """幂等：0002（GRANT/默认权限）、0004（IF NOT EXISTS）与 0007（ADD COLUMN IF NOT EXISTS）重复执行不应报错。"""
     apply_sql_file(SQL_DIR / "0002_roles_grants.sql")
     apply_sql_file(SQL_DIR / "0004_delete_audit.sql")
+    apply_sql_file(SQL_DIR / "0007_superuser.sql")

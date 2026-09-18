@@ -71,22 +71,26 @@ async def approver_names(
 
     参数:
         session: DB 会话。
-        org_id: 租户（第二道闸：审批行已按租户过滤）。
+        org_id: 租户（过滤依据；**平台超管场景可传 None**，见下）。
         approver_ids: 审批人 ID 列表（可含 None，调用方直接从行上取即可）。
     返回:
         ``{user_id: username}``；找不到的 ID 不出现在结果里（调用方回退展示「已停用用户」）。
     注意:
         写成**模块级函数**而不是只做实例方法：读路径（审批列表/详情）不需要构造
         ``ApprovalService``（它的构造会顺手建 Redis 投递客户端），省一次无谓的连接构造。
+    ``org_id=None`` 的用途（平台超管，2026-09）:
+        超管切换到租户 X 审批后，``approver_id`` 是他自己（归属平台组织）—— 若仍按
+        ``org_id=X`` 过滤，审批历史里「谁批的」会变成空。传 None = 只按 ID（不按租户）查。
+        安全前提：``approver_ids`` **只能来自调用方已按租户过滤的审批行**
+        （审批列表/详情都先过了 org 过滤），因此这里没有「凭 ID 猜别人租户用户」的入口。
     """
     ids = [item for item in approver_ids if item is not None]
     if not ids:
         return {}
-    rows = (
-        await session.execute(
-            select(SysUser.id, SysUser.username).where(SysUser.org_id == org_id, SysUser.id.in_(ids))
-        )
-    ).all()
+    stmt = select(SysUser.id, SysUser.username).where(SysUser.id.in_(ids))
+    if org_id is not None:
+        stmt = stmt.where(SysUser.org_id == org_id)
+    rows = (await session.execute(stmt)).all()
     return {str(row[0]): row[1] for row in rows}
 
 
