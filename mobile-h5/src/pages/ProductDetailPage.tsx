@@ -46,7 +46,7 @@ import DeliveryNotes from "../components/DeliveryNotes";
 import QueryError from "../components/QueryError";
 import StreamingPanel from "../components/StreamingPanel";
 import { ApprovalStatusTag, ProductStatusTag, ScoreTag } from "../components/StatusTag";
-import { formatPrice, formatTime, toTagColor } from "../services/format";
+import { formatPrice, formatTime, toTagColor } from "@pa/core/services/mobileFormat";
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 

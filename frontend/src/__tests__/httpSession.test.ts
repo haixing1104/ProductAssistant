@@ -97,6 +97,16 @@ describe("http 会话层", () => {
     expect(useAuthStore.getState().token).toBe("rotated");
   });
 
+  it("scheduleTokenRefresh 对「没有 exp」的 token 不排定时器（否则 delay=0 会变成续签风暴）", async () => {
+    vi.useFakeTimers();
+    post.mockResolvedValue({ data: { data: { access_token: "rotated" } } });
+    // 合法 base64url、合法 JSON，但没有 exp 字段 —— 旧实现算成 delay=0 → 立刻续签 → 无限循环
+    useAuthStore.getState().setSession("header.eyJ1c2VyIjoiYSJ9.sig");
+    scheduleTokenRefresh();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("到期前续签失败会重试一次；仍失败则弹「会话过期」（不把用户静默踢到登录页）", async () => {
     vi.useFakeTimers();
     post.mockRejectedValue(new Error("network"));

@@ -9,15 +9,17 @@ import axios, { type AxiosRequestConfig } from "axios";
 
 import { useAuthStore } from "../store/authStore";
 
+import { AUTH_EXPIRED_EVENT, apiUrl, getPlatform } from "./platform";
+
 export const http = axios.create({
-  baseURL: "/api/v1",
-  // 30s：CSV 导入/生成触发都在秒级；SSE 不走 axios（见 services/sse.ts）
+  // 基址在请求拦截器里按当前平台算（见下方 setBaseURL 注释）：
+  // Web = ""（同源相对路径，dev 走 vite 代理）；RN = EXPO_PUBLIC_API_BASE_URL（原生没有代理）
   timeout: 30000,
   withCredentials: true,
 });
 
-/** 会话过期全局事件：SessionExpiredGate 监听并弹友好提示（不静默硬跳） */
-export const AUTH_EXPIRED_EVENT = "pa:auth-expired";
+/** 会话过期全局事件：SessionExpiredGate 监听并弹友好提示（不静默硬跳）。常量定义在 platform.ts。 */
+export { AUTH_EXPIRED_EVENT };
 
 /** backend refresh 的 CSRF 头（服务端要求 `x-requested-with: fetch`） */
 export const CSRF_HEADER = { "X-Requested-With": "fetch" };
@@ -30,12 +32,13 @@ export const CSRF_HEADER = { "X-Requested-With": "fetch" };
  * 优先用 `crypto.randomUUID()`（HTTPS/现代浏览器都有），退化到随机串（老内核/测试环境）。
  */
 export function newRequestId(): string {
-  const cryptoObj = globalThis.crypto as Crypto | undefined;
-  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
-  return `req-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  // 平台端口：Web 用 crypto.randomUUID（退化到 req- 前缀）；RN 用 expo-crypto
+  return getPlatform().newRequestId();
 }
 
 http.interceptors.request.use((config) => {
+  // 每次请求都按当前平台算基址：避免「平台实现在 import 之后才装上」时把基址定死成空串
+  config.baseURL = apiUrl("/api/v1");
   const token = useAuthStore.getState().token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   // 同一请求的重放（401 续签后重发）复用同一个 ID：config.headers 会被带走，
@@ -91,13 +94,8 @@ export function restoreSession(): Promise<boolean> {
 let expiredNotified = false;
 
 function rememberReturnUrl(): void {
-  try {
-    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-      sessionStorage.setItem("pa_return", window.location.pathname + window.location.search);
-    }
-  } catch {
-    // sessionStorage 不可用（隐私模式等）时忽略
-  }
+  // 记录"从哪来"：Web 写 sessionStorage（原逻辑逐行搬进 platform.ts）；RN 写 AsyncStorage。
+  getPlatform().rememberReturnUrl();
 }
 
 /** 登录成功/登出后可再次触发过期提示时复位标记。 */
@@ -107,41 +105,33 @@ export function resetExpiredFlag(): void {
 
 /** 会话真实失效（续签失败/被吊销）：清空登录态并通知 UI，由用户确认后再离开。 */
 export function sessionExpired(): void {
-  if (typeof window === "undefined") return;
+  // 注意：这里**不再**用 `typeof window === "undefined"` 提前返回 ——
+  // RN 里 window 未必存在，提前返回会让「清空登录态」这一步在原生端静默丢失。
+  // 平台差异改由端口承担（Web = window 事件；RN = 内部 emitter）。
   rememberReturnUrl();
   useAuthStore.getState().clear();
   if (expiredNotified) return;
   expiredNotified = true;
-  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  getPlatform().emitAuthExpired();
 }
 
 // ---------- 到期前主动续签 ----------
-let autoTimer: number | undefined;
+let cancelAutoTimer: (() => void) | undefined;
 
-/** 解码 JWT exp，提前 ~30s 主动续签；续签成功后再排下一次。 */
+/** 解码 JWT exp（由平台端口提供：Web 用 atob，RN 用纯 JS base64url 解码），提前 ~30s 主动续签。 */
 export function scheduleTokenRefresh(): void {
-  if (typeof window === "undefined") return;
+  const platform = getPlatform();
   const token = useAuthStore.getState().token;
   if (!token) return;
-  let expMs = 0;
-  try {
-    const part = token.split(".")[1];
-    // JWT 的 base64url **不带填充**，而 atob 在部分运行时（Node/jsdom）要求长度对齐 4 ——
-    // 不补 `=` 会直接抛 InvalidCharacterError，导致「到期前续签」静默失效（只剩 401 兜底）。
-    const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
-    const json = decodeURIComponent(escape(atob(padded)));
-    expMs = (JSON.parse(json).exp ?? 0) * 1000;
-  } catch {
-    return;
-  }
+  const expMs = platform.jwtExpMs(token);
+  if (expMs === null) return; // 畸形 token：不排定时器（只留 401 兜底），也不抛错
   const delay = Math.max(0, expMs - Date.now() - 30000);
-  if (autoTimer !== undefined) window.clearTimeout(autoTimer);
-  autoTimer = window.setTimeout(async () => {
+  cancelAutoTimer?.();
+  cancelAutoTimer = platform.setTimeout(async () => {
     const ok = await refreshSession(true); // force：到期前必须真续签，不能因「本地还有 token」跳过
     if (!ok && useAuthStore.getState().token) {
       // 5s 后重试一次（避免瞬时网络抖动误踢）；仍失败则主动弹「会话过期」提示
-      window.setTimeout(async () => {
+      platform.setTimeout(async () => {
         const ok2 = await refreshSession(true);
         if (!ok2 && useAuthStore.getState().token) sessionExpired();
       }, 5000);

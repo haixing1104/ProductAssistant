@@ -12,6 +12,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { authApi } from "../api";
 import { apiErrorMessage } from "../services/errors";
 import { resetExpiredFlag, scheduleTokenRefresh } from "../services/http";
+import { getPlatform } from "../services/platform";
 import { useAuthStore } from "../store/authStore";
 
 interface FormValues {
@@ -47,8 +48,7 @@ export default function LoginPage() {
       setSession(login.access_token, { id: me.id, org_id: me.org_id, username: me.username, role: me.role });
       scheduleTokenRefresh(); // 到期前主动续签（HttpOnly refresh cookie）
       resetExpiredFlag(); // 新会话开始后允许再次触发过期提示
-      const returnTo = sessionStorage.getItem("pa_return") || "/";
-      sessionStorage.removeItem("pa_return");
+      const returnTo = getPlatform().takeReturnUrl() || "/";
       navigate(returnTo);
     } catch (e) {
       message.error(`登录失败：${apiErrorMessage(e, "无法登录，请稍后重试")}`);

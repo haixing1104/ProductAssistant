@@ -8,7 +8,7 @@ import { Popover, Tag } from "antd-mobile";
 import { channelLabel, hasDeliveryFailure, notificationsSummary, statusMeta } from "@pa/core/services/notificationStatus";
 import type { ApprovalNotification } from "@pa/core/types/api";
 
-import { toTagColor } from "../services/format";
+import { toTagColor } from "@pa/core/services/mobileFormat";
 
 interface Props {
   notes?: ApprovalNotification[];

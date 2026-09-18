@@ -35,7 +35,7 @@ import type { Product } from "@pa/core/types/api";
 import ProductEditorPopup from "../components/ProductEditorPopup";
 import QueryError from "../components/QueryError";
 import { ProductStatusTag } from "../components/StatusTag";
-import { formatPrice } from "../services/format";
+import { formatPrice } from "@pa/core/services/mobileFormat";
 
 const PAGE_SIZE = 10;
 const CSV_TEMPLATE = "sku_code,title,base_price,stock_status,raw_images";

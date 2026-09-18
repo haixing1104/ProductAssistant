@@ -11,6 +11,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { authApi } from "@pa/core/api";
 import { apiErrorMessage } from "@pa/core/services/errors";
 import { resetExpiredFlag, scheduleTokenRefresh } from "@pa/core/services/http";
+import { getPlatform } from "@pa/core/services/platform";
 import { useAuthStore } from "@pa/core/store/authStore";
 
 import { readRememberedOrg, rememberOrg } from "../services/rememberOrg";
@@ -49,8 +50,8 @@ export default function LoginPage() {
       scheduleTokenRefresh(); // 到期前主动续签（HttpOnly refresh cookie）
       resetExpiredFlag(); // 新会话开始后允许再次触发过期提示
       if (values.orgName) rememberOrg(values.orgName);
-      const returnTo = sessionStorage.getItem("pa_return") || "/";
-      sessionStorage.removeItem("pa_return");
+      // 回跳地址由平台端口提供（Web = sessionStorage；RN = AsyncStorage）—— 不再直接读 sessionStorage
+      const returnTo = getPlatform().takeReturnUrl() || "/";
       navigate(returnTo);
     } catch (e) {
       Toast.show({ icon: "fail", content: `登录失败：${apiErrorMessage(e, "无法登录，请稍后重试")}` });

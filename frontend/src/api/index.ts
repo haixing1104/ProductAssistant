@@ -2,6 +2,7 @@
 //
 // 分页约定：响应体是数组，总数在 **`X-Total-Count`** 响应头（`unwrapPage` 负责拼装）。
 import { http } from "../services/http";
+import { getPlatform, type PaUploadFile } from "../services/platform";
 import type {
   Approval,
   AbortJobResult,
@@ -78,9 +79,10 @@ export const productsApi = {
       http.delete(`/products/${id}/purge`, { data: { reason } }),
     ),
   generate: (id: string) => unwrap<GenerateResult>(http.post(`/products/${id}/generate`)),
-  importCsv: async (file: File) => {
+  importCsv: async (file: PaUploadFile) => {
     const form = new FormData();
-    form.append("file", file);
+    // Web 传原生 File；RN 传 {uri, name, type}（RN 的 FormData 原生接受后者）—— 类型上统一向上转一次
+    form.append("file", file as unknown as Blob);
     return unwrap<CsvImportResult>(
       http.post("/products/import-csv", form, { headers: { "Content-Type": "multipart/form-data" } }),
     );
@@ -91,11 +93,13 @@ export const ossApi = {
   /** 第一步：换预签名 PUT URL（登录态；需 product_id + content_type）。 */
   presign: (payload: { product_id: string; filename: string; content_type: string }) =>
     unwrap<PresignResult>(http.post("/oss/presign", payload)),
-  /** 第二步：浏览器直传 OSS（**必须带同一个 Content-Type**，它参与签名）。 */
-  put: async (uploadUrl: string, file: File, contentType: string): Promise<void> => {
-    const resp = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body: file });
-    if (!resp.ok) throw new Error(`OSS 直传失败 HTTP ${resp.status}`);
-  },
+  /**
+   * 第二步：直传 OSS（**必须带同一个 Content-Type**，它参与签名）。
+   * 传输交给平台端口：Web = `fetch(PUT, File)`；RN = `expo-file-system` 的 BINARY_CONTENT PUT
+   *（RN 没有 `File`/`Blob` 直传能力，这是原生端与浏览器最容易踩空的一处）。
+   */
+  put: (uploadUrl: string, file: PaUploadFile, contentType: string): Promise<void> =>
+    getPlatform().putBinary(uploadUrl, contentType, file),
 };
 
 export const contentsApi = {

@@ -10,6 +10,7 @@
 //    必须在文本层自己识别 —— PP 只解析 `data:` 行，因此分不清「空闲关流」（应带
 //    Last-Event-ID 续连）与「读流异常」（应告警并限量重试）。
 import { fetchStreamTicket } from "./http";
+import { apiUrl, getPlatform, type PaSseAttempt, type PaSseOutcome } from "./platform";
 
 /** 与 backend `services/stream_reader.TERMINAL_EVENT_TYPES` 保持一致（改一侧必须改另一侧）。 */
 export const TERMINAL_EVENT_TYPES = new Set(["done", "rejected", "failed", "hitl.waiting"]);
@@ -22,8 +23,8 @@ export interface SseFrame {
   comment?: string;
 }
 
-/** 一次连接的走向（调用方据此决定是否重连）。 */
-export type SseOutcome = "terminal" | "ready" | "idle" | "error" | "eof";
+/** 一次连接的走向（调用方据此决定是否重连）。定义在平台端口层，这里保持同名导出以免破坏既有调用方。 */
+export type SseOutcome = PaSseOutcome;
 
 /**
  * 解析单帧（帧内多行）。
@@ -77,56 +78,17 @@ export function frameOutcome(frame: SseFrame): SseOutcome | null {
   return null;
 }
 
-/** 流地址（相对路径；dev 由 vite 代理，生产由 nginx 同源反代）。 */
+/**
+ * 流地址。Web 是相对路径（dev 由 vite 代理，生产由 nginx 同源反代）；
+ * RN 会在前面拼上 `EXPO_PUBLIC_API_BASE_URL`（原生客户端没有代理，必须是绝对地址）。
+ */
 export function streamUrl(productId: string): string {
-  return `/api/v1/products/${productId}/stream`;
+  return apiUrl(`/api/v1/products/${productId}/stream`);
 }
 
-/**
- * 读取 SSE 响应体直到结束/终态，逐帧回调。
- *
- * 参数:
- *   response: 已建立的 SSE 响应（`resp.body` 必须非空）。
- *   onFrame: 每帧回调（含注释帧，供 UI 区分「空闲」等状态）。
- *   signal: 中断信号（组件卸载/切换商品时 abort）。
- * 返回:
- *   `terminal`（终态，勿重连）/ `ready`（无进行中任务，勿重连）/ `idle`（空闲关流，可续连）/
- *   `error`（读流异常，限量重试）/ `eof`（对端优雅关流）。
- */
-export async function consumeSse(
-  response: Response,
-  onFrame: (frame: SseFrame) => void,
-  signal: AbortSignal,
-): Promise<SseOutcome> {
-  if (!response.body) return "eof";
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    for (;;) {
-      if (signal.aborted) return "eof";
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split("\n\n");
-      buffer = chunks.pop() ?? "";
-      for (const chunk of chunks) {
-        const frame = parseSseFrame(chunk.split("\n"));
-        if (!frame) continue;
-        onFrame(frame);
-        const outcome = frameOutcome(frame);
-        if (outcome) return outcome;
-      }
-    }
-  } finally {
-    try {
-      await reader.cancel();
-    } catch {
-      // 已取消/已关闭：无需处理
-    }
-  }
-  return "eof";
-}
+// `consumeSse` **已移入 `./platform`**：它依赖 `response.body.getReader()`，是纯浏览器实现。
+// RN 侧在 `rnPlatform.openSse` 里用 expo/fetch 实现同一契约（同样能拿到注释帧），
+// 因此上面这些「什么算终态、什么时候该停」的判断**两端共用一份**。
 
 export interface StreamHandlers {
   /** 每帧回调（注释帧也会来） */
@@ -186,34 +148,25 @@ export async function connectProductStream(options: StreamOptions): Promise<Stre
   while (!state.stopped && !signal.aborted) {
     const headers: Record<string, string> = { Accept: "text/event-stream" };
     if (state.lastEventId) headers["Last-Event-ID"] = state.lastEventId;
-    let outcome: SseOutcome = "eof";
-    let failure: string | null = null;
-    try {
-      const resp = await fetch(`${streamUrl(productId)}?ticket=${encodeURIComponent(ticket)}`, {
+    // 传输交给平台端口（Web = fetch + 读流；RN = expo/fetch），
+    // 失败与中断都在端口内部收敛成 `{outcome, failure}` —— 因此**重连策略与平台无关**，只在这一处写。
+    const attempt: PaSseAttempt = await getPlatform().openSse(
+      {
+        url: `${streamUrl(productId)}?ticket=${encodeURIComponent(ticket)}`,
         headers,
+        lastEventId: state.lastEventId,
         signal,
-      });
-      if (!resp.ok) {
-        outcome = "error";
-        failure = `HTTP ${resp.status}`;
-      } else {
-        outcome = await consumeSse(
-          resp,
-          (frame) => {
-            if (frame.id) state.lastEventId = frame.id;
-            onFrame(frame);
-            if (!frame.comment && frame.type && TERMINAL_EVENT_TYPES.has(frame.type)) {
-              state.terminals.push(frame.type);
-            }
-          },
-          signal,
-        );
-      }
-    } catch (e) {
-      if (signal.aborted) break;
-      outcome = "error";
-      failure = String(e);
-    }
+      },
+      (frame) => {
+        if (frame.id) state.lastEventId = frame.id;
+        onFrame(frame);
+        if (!frame.comment && frame.type && TERMINAL_EVENT_TYPES.has(frame.type)) {
+          state.terminals.push(frame.type);
+        }
+      },
+    );
+    const outcome: SseOutcome = attempt.outcome;
+    const failure: string | null = attempt.failure ?? null;
     if (signal.aborted) break;
 
     if (outcome === "terminal") {

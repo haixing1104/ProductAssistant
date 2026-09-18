@@ -1,8 +1,13 @@
-// SSE 事件 → 中文阶段行（移动端共用纯函数，单测守护）。
+// SSE 事件 → 中文阶段行（**移动端共用纯函数**，H5 与 RN 同源，单测守护）。
+//
+// 位置说明（2026-09 从 `mobile-h5/src/services/streamLabels.ts` 上移到契约核心层）：
+//   事件文案是**后端事件契约的读侧**，两端显示同一句话才谈得上"同源同义"。
+//   覆盖率口径：用例随文件一起放在共享层（`frontend/src/__tests__/streamLabels.test.ts`），
+//   由桌面端套件统一守护（原因见 `mobileFormat.ts` 的头部注释）。
 //
 // 与桌面 `StreamingDisplay.formatEvent` 逐条对齐（同一份事件契约，改一侧必须改另一侧）:
 //   15 类事件 + `ready` 控制帧；`content.chunk` 是打字机正文不进阶段流。
-import type { SseFrame } from "@pa/core/services/sse";
+import type { SseFrame } from "./sse";
 
 export const TYPE_LABELS: Record<string, string> = {
   "generate.started": "▶ 开始生成",

@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { connectProductStream, type SseFrame } from "@pa/core/services/sse";
 
-import { formatEvent } from "../services/streamLabels";
+import { formatEvent } from "@pa/core/services/streamLabels";
 
 export interface LiveImage {
   url: string;

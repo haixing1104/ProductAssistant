@@ -28,6 +28,9 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       include: ["src/api/**", "src/services/**", "src/store/**"],
+      // 两个「移动端共用」文件（`src/services/mobileFormat.ts` / `streamLabels.ts`）**不做 exclude**：
+      // 它们的用例已经在共享层（`src/__tests__/mobileFormat.test.ts` / `streamLabels.test.ts`），
+      // 由本套件统一守护 —— 这是"测试在哪、门禁在哪"的落点（H5 侧 v8 覆盖统计不到 root 外文件，实测）。
       exclude: ["src/**/*.test.{ts,tsx}"],
       // 基线（2026-09 首版）：stmts 88 / branch 82 / func 87 / lines 89 —— 门槛取略低于基线的值，
       // 避免「多写一行 UI 逻辑就卡 CI」，同时挡住「大面积无覆盖」的回归。

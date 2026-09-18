@@ -52,8 +52,10 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
-    // 门禁范围 = 移动端自己的薄逻辑层（纯函数/视图模型）。共享核心层（frontend/src）的覆盖率
-    // 由桌面端套件守护（同一份代码），在两边重复设门槛只会制造双重标准。
+    // 门禁范围 = 移动端自己的薄逻辑层（纯函数/视图模型）。
+    // 两个「移动端共用文件」（`../frontend/src/services/{mobileFormat,streamLabels}.ts`）**不在这里**：
+    // v8 覆盖默认不统计 root 之外的文件（`allowExternal` 实测也不生效），
+    // 它们的用例因此放在共享层 `frontend/src/__tests__/`，门禁由桌面端套件承担。
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

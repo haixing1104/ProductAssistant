@@ -1,9 +1,17 @@
-// 移动端专用展示工具（纯函数，便于单测）。
+// 移动端展示工具（纯函数，便于单测）—— **H5 与 RN 共用同一份**。
+//
+// 位置说明（2026-09 从 `mobile-h5/src/services/format.ts` 上移到契约核心层）:
+//   出现第 2 个移动端消费方（`mobile-rn`）后，这些格式化/颜色翻译口径必须**同源**，
+//   否则两端会出现"同一个分数在 H5 是金色、在 RN 是灰色"这类看不见的语义漂移。
+//   覆盖率口径：用例随文件一起放在共享层（`frontend/src/__tests__/mobileFormat.test.ts`），
+//   由**桌面端套件**（`./scripts/test-frontend.sh`）统一守护 —— "测试在哪、门禁在哪"。
+//   （H5 侧的 v8 覆盖统计不到 root 之外的文件，`allowExternal` 实测也不生效 → 留在那边等于没人守。）
 //
 // 为什么需要「颜色翻译」这一层: 共享核心层（@pa/core/services/*）里的颜色是**桌面端 antd 口径**
 // （`green` / `gold` / `red` / `processing`…），而 antd-mobile 的 `Tag` 只认
 // `default | primary | success | warning | danger` 或自定义色值 —— 直接把 `gold` 塞进去会**静默失效**，
 // 变成灰色 Tag（扫视找异常的能力就此丢失，这正是审批列表最关键的锚点）。
+// RN 侧同理：`mobile-rn/src/theme/tagColors.ts` 把这些语义名再映射成具体色值。
 export type MobileTagColor = "default" | "primary" | "success" | "warning" | "danger";
 
 /** antd 预设色 → antd-mobile Tag 色（未识别时回落 default，绝不抛错）。 */

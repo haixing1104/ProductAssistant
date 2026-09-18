@@ -22,7 +22,7 @@ import type { Approval } from "@pa/core/types/api";
 import DeliveryNotes from "../components/DeliveryNotes";
 import QueryError from "../components/QueryError";
 import { ApprovalStatusTag, ScoreTag } from "../components/StatusTag";
-import { formatTime, toTagColor } from "../services/format";
+import { formatTime, toTagColor } from "@pa/core/services/mobileFormat";
 
 type Tab = "pending" | "approved" | "rejected";
 const PAGE_SIZE = 10;

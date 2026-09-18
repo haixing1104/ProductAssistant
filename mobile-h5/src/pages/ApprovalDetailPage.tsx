@@ -40,7 +40,7 @@ import BlockView from "../components/BlockView";
 import DeliveryNotes from "../components/DeliveryNotes";
 import QueryError from "../components/QueryError";
 import { ApprovalStatusTag, ScoreTag } from "../components/StatusTag";
-import { formatTime, toTagColor } from "../services/format";
+import { formatTime, toTagColor } from "@pa/core/services/mobileFormat";
 
 export default function ApprovalDetailPage() {
   const { approvalId = "" } = useParams();

@@ -10,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { authApi } from "@pa/core/api";
 import { ROLE_LABEL, canApprove, isAdmin, useAuthStore } from "@pa/core/store/authStore";
 
-import { desktopBaseUrl } from "../services/format";
+import { desktopBaseUrl } from "@pa/core/services/mobileFormat";
 import { forgetOrg } from "../services/rememberOrg";
 
 const DESKTOP_ONLY = [

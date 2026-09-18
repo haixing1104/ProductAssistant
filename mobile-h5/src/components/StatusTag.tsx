@@ -7,7 +7,7 @@ import { Tag } from "antd-mobile";
 import { scoreColor } from "@pa/core/services/contentSnapshot";
 import { approvalStatusLabel, productStatusColor, productStatusLabel } from "@pa/core/services/productMeta";
 
-import { toTagColor } from "../services/format";
+import { toTagColor } from "@pa/core/services/mobileFormat";
 
 export function ProductStatusTag({ status }: { status?: string | null }) {
   if (!status) return null;
