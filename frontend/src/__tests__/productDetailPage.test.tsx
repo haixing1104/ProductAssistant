@@ -51,6 +51,7 @@ vi.mock("react-router-dom", () => ({
 const mockProducts = vi.mocked(productsApi);
 const PRODUCT_ID = "p-1";
 
+/** 造一个最小可信的商品（默认草稿态；用例用 overrides 指定状态与进行中任务）。 */
 function product(overrides: Partial<Product> = {}): Product {
   return {
     id: PRODUCT_ID,

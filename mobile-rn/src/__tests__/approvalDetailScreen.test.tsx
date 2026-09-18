@@ -18,6 +18,7 @@ jest.mock("@pa/core/api", () => ({
 }));
 jest.mock("../platform/pickFile", () => ({ pickCsvFile: jest.fn(), pickImageFile: jest.fn() }));
 
+/** 只桩审批域（含 deeplink：票据校验走的就是它）。 */
 const mockApi = approvalsApi as unknown as {
   get: jest.Mock;
   approve: jest.Mock;
@@ -25,9 +26,12 @@ const mockApi = approvalsApi as unknown as {
   deeplink: jest.Mock;
 };
 
+/** SafeAreaProvider 的初始度量（jsdom 无原生安全区：给 0 让布局与真机解耦）。 */
 const insets = { top: 0, left: 0, right: 0, bottom: 0 };
+/** iPhone 14 逻辑分辨率（给安全区 provider 一个稳定的测量环境）。 */
 const frame = { x: 0, y: 0, width: 390, height: 844 };
 
+/** 造一张带完整快照与命中点的审批单（详情页要渲染评估分/命中点/图文快照）。 */
 function approval(overrides: Partial<Approval> = {}): Approval {
   return {
     id: "a-1",
@@ -50,6 +54,7 @@ function approval(overrides: Partial<Approval> = {}): Approval {
   };
 }
 
+/** 挂载审批详情（⚠️ RNTL v14 的 render 返回 Promise，必须 await）。 */
 async function renderScreen(props: { approvalId: string; ticket?: string | null }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

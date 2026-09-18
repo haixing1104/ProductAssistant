@@ -17,6 +17,7 @@ import type { Approval } from "@pa/core/types/api";
 import ApprovalDetailPage from "../pages/ApprovalDetailPage";
 import { typeWhenReady } from "../test/helpers";
 
+/** 可变的 searchParams 替身：用例通过它注入/清除深链票据（`?ticket=…`）。 */
 const searchParams = new URLSearchParams();
 
 vi.mock("@pa/core/api", () => ({
@@ -29,8 +30,10 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => vi.fn(),
 }));
 
+/** 只桩审批域（含 deeplink：票据校验走的就是它）。 */
 const mockApi = vi.mocked(approvalsApi);
 
+/** 造一张带完整快照的审批单（详情页要渲染评估分/命中点/图文快照）。 */
 function approval(overrides: Partial<Approval> = {}): Approval {
   return {
     id: "a-1",
@@ -71,6 +74,7 @@ function withViolations(): Approval {
   });
 }
 
+/** 挂载审批详情（独立 QueryClient + 关重试）。 */
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

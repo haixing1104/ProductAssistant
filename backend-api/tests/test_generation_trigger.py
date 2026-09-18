@@ -127,6 +127,12 @@ async def test_enqueue_failure_rolls_back_product_state(
     """投递失败（Redis 不可用）→ 503，且商品状态回滚为 draft（不能永远卡在 generating）。"""
 
     def _boom(self, **_kwargs):
+        """把投递打成必然失败（等价于 Redis 不可用）。
+
+        为什么替换的是 ``AIEngineClient.trigger_generation`` 而不是 Redis 客户端:
+            要验证的是「入队这一步失败后，**商品状态必须回滚**」这条状态机契约；
+            直接打桩最外层可以避开 Redis 连接细节，让用例只关心可观察结果（503 + draft）。
+        """
         raise ConnectionError("redis down")
 
     monkeypatch.setattr(AIEngineClient, "trigger_generation", _boom)

@@ -18,13 +18,16 @@ jest.mock("expo-file-system/legacy", () => ({
   FileSystemUploadType: { BINARY_CONTENT: 0, MULTIPART: 1 },
 }));
 
+/** expo/fetch 的桩（RN 侧的流式读走它；这里只关心被怎么调用）。 */
 const expoFetch = require("expo/fetch").fetch as jest.Mock;
+/** expo-file-system（legacy API）的桩：OSS 直传断言 `BINARY_CONTENT` 与 Content-Type。 */
 const FileSystem = require("expo-file-system/legacy") as {
   uploadAsync: jest.Mock;
   FileSystemUploadType: { BINARY_CONTENT: number };
 };
 const { RN_PLATFORM, installRnPlatform } = require("../platform/rnPlatform") as typeof import("../platform/rnPlatform");
 
+/** 文本 → UTF-8 字节（模拟 `body.getReader()` 吐出的 chunk）。 */
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 
 /** 造一个「可流式读」的假 Response：按帧喂数据，读完即 done。 */

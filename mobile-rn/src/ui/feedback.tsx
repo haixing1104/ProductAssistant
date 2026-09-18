@@ -11,8 +11,10 @@ import { colors, font, radius, space, TOUCH_TARGET } from "./theme";
 
 // ============================== Toast ==============================
 
+/** Toast 图标语义（`null` = 纯文字提示）。 */
 export type ToastIcon = "success" | "fail" | null;
 
+/** Toast 参数（`content` 必填，其余可选）。 */
 export interface ToastOptions {
   content: string;
   icon?: ToastIcon;
@@ -22,8 +24,10 @@ export interface ToastOptions {
 
 type ToastListener = (options: Required<ToastOptions>) => void;
 
+/** 订阅者集合（Host 挂载时注册；**纯逻辑、不依赖渲染**，因此可被单测直接断言）。 */
 const toastListeners = new Set<ToastListener>();
 
+/** 命令式 Toast API（`show` 无 Host 时静默丢弃：提示类不阻塞主流程）。 */
 export const Toast = {
   /** `Toast.show("已保存")` 或 `Toast.show({ content, icon: "fail" })`（两种都支持，与 H5 用法一致）。 */
   show(options: ToastOptions | string): void {
@@ -40,6 +44,7 @@ export const Toast = {
 
 // ============================== Dialog ==============================
 
+/** 确认框参数。 */
 export interface DialogOptions {
   title?: string;
   content?: string;
@@ -52,8 +57,18 @@ export interface DialogOptions {
 
 type DialogListener = (options: DialogOptions, settle: (ok: boolean) => void) => void;
 
+/** 订阅者集合（与 toastListeners 同机制）。 */
 const dialogListeners = new Set<DialogListener>();
 
+/**
+ * 发起一次确认框并等用户选择。
+ *
+ * 返回:
+ *   用户点确认 → true；点取消 → false。
+ * 注意:
+ *   **没有 Host 时 resolve(false)** —— 明确失败而不是静默挂起，
+ *   否则 `await Dialog.confirm(...)` 会永远不返回（页面看着像卡死）。
+ */
 function openDialog(options: DialogOptions): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const listeners = [...dialogListeners];
@@ -66,6 +81,7 @@ function openDialog(options: DialogOptions): Promise<boolean> {
   });
 }
 
+/** 命令式 Dialog API（`alert` = 单按钮，`confirm` = 双按钮）。 */
 export const Dialog = {
   alert(options: DialogOptions): Promise<boolean> {
     return openDialog({ ...options, cancelText: null });
@@ -83,6 +99,7 @@ export function resetFeedbackListeners(): void {
 
 // ============================== Host ==============================
 
+/** 图标字形（RN 无图标字体依赖：用 Unicode 字形保证双端一致且零依赖）。 */
 const ICON_GLYPH: Record<Exclude<ToastIcon, null>, string> = { success: "✓", fail: "✕" };
 
 interface DialogState {

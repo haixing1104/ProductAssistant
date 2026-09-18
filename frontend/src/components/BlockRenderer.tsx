@@ -14,6 +14,7 @@ interface Props {
   bordered?: boolean;
 }
 
+/** 只取 text block 拼成纯文本（复制/搜索/降级展示用；图片 block 忽略）。 */
 export function blocksToPlainText(blocks?: ContentBlock[] | null): string {
   return (
     blocks
@@ -24,6 +25,7 @@ export function blocksToPlainText(blocks?: ContentBlock[] | null): string {
   );
 }
 
+/** 渲染 blocks（空/无内容时显示「（无内容）」而非空白；未知 block 类型按文本兜底）。 */
 export default function BlockRenderer({ blocks, maxHeight, bordered = false }: Props) {
   const list = blocks ?? [];
   const hasBlocks = list.length > 0;

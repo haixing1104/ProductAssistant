@@ -9,6 +9,7 @@
 //   15 类事件 + `ready` 控制帧；`content.chunk` 是打字机正文不进阶段流。
 import type { SseFrame } from "./sse";
 
+/** 流事件类型 → 中文标题（与 backend `stream_reader` 的事件名对齐；未知类型透出原名）。 */
 export const TYPE_LABELS: Record<string, string> = {
   "generate.started": "▶ 开始生成",
   "stage.researching": "🔎 正在核对数据（Agent）",

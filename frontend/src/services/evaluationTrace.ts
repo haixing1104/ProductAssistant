@@ -2,6 +2,7 @@
 // 数据源：backend 只读端点 `GET /products/{id}/evaluation-logs`（`schema_pa_ai.evaluation_logs`）。
 import type { EvaluationLog } from "../types/api";
 
+/** 详情页「思考轨迹」表格的行形状（`traceRows` 的输出，UI 只消费这一层）。 */
 export interface TraceRow {
   key: string;
   /** 第几次评估（按接口返回的时间正序，即重试次序） */
@@ -14,6 +15,7 @@ export interface TraceRow {
   createdAt: string | null;
 }
 
+/** 评估层枚举 → 中文（与 ai-engine 的 `evaluator_type` 取值对齐；新增层要同步这里）。 */
 const EVALUATOR_LABELS: Record<string, string> = {
   rule: "规则层（违禁词/极限词）",
   llm: "LLM 语义评估",

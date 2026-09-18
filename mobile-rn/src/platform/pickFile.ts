@@ -28,6 +28,7 @@ export async function pickCsvFile(): Promise<PaUploadFile | null> {
   };
 }
 
+/** 选中的图片：`file` 直接喂给共享层的预签名直传，`size` 用于上传前判上限。 */
 export interface PickedImage {
   file: PaUploadFile;
   /** 本地文件字节数（用于上传前判 `max_upload_bytes`，避免白传一遍再被拒） */

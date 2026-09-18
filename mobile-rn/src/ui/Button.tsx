@@ -7,8 +7,11 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View, type ViewStyle } 
 
 import { colors, font, radius, space, TOUCH_TARGET } from "./theme";
 
+/** 按钮语义（primary 主操作 / danger 危险操作 / default 次要）。 */
 export type ButtonVariant = "primary" | "danger" | "default";
+/** 填充方式（solid 实心 / outline 描边 / none 纯文字）。 */
 export type ButtonFill = "solid" | "outline" | "none";
+/** 尺寸（mini 用于卡内操作；large 用于底部固定操作栏主按钮）。 */
 export type ButtonSize = "mini" | "small" | "large";
 
 interface Props {
@@ -25,28 +28,41 @@ interface Props {
   accessibilityLabel?: string;
 }
 
+/** 各语义的实心底色（与 antd-mobile Button 视觉一致）。 */
 const SOLID: Record<ButtonVariant, string> = {
   primary: colors.primary,
   danger: colors.danger,
   default: "#f5f5f5",
 };
 
+/** 描边/纯文字模式下的字色（同时用作描边色，保证文字与边框同色）。 */
 const OUTLINE_TEXT: Record<ButtonVariant, string> = {
   primary: colors.primary,
   danger: colors.danger,
   default: "#666666",
 };
 
+/** 实心模式下的字色（primary/danger 用白字，default 用深色字）。 */
 const SOLID_TEXT: Record<ButtonVariant, string> = {
   primary: "#ffffff",
   danger: "#ffffff",
   default: colors.text,
 };
 
+/** 尺寸 → 视觉高度（mini 只有 ~26：可点区域靠 `hitSlop` 补到 44，见下方渲染）。 */
 const HEIGHT: Record<ButtonSize, number> = { mini: 26, small: 32, large: 46 };
+/** 尺寸 → 左右内边距。 */
 const PAD: Record<ButtonSize, number> = { mini: 10, small: 12, large: 20 };
+/** 尺寸 → 字号（统一从 theme 取，不允许各页手写）。 */
 const TEXT_SIZE: Record<ButtonSize, number> = { mini: font.xs, small: font.sm, large: font.md };
 
+/**
+ * 按钮（自研薄 UI，替代 antd-mobile Button）。
+ *
+ * 两条移动端硬要求（照抄桌面 CSS 会漏）:
+ *   ① 触控目标 ≥44：用 `hitSlop` 补足小尺寸按钮；
+ *   ② 按下必须有反馈：pressed 态改透明度 —— 手机上「点上去没反应」会被当成卡死。
+ */
 export default function Button({
   children,
   onPress,

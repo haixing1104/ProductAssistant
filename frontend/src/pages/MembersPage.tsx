@@ -18,6 +18,7 @@ interface CreateValues {
   role: "reviewer" | "operator";
 }
 
+/** 用户管理页：分页列表 + 新建（reviewer/operator）+ 停用（单向，确认框讲明）。 */
 export default function MembersPage() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);

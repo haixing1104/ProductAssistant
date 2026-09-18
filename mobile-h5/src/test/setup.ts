@@ -1,3 +1,8 @@
+// 测试环境公共桩（vitest setup）。
+//
+// 定位与桌面端 `frontend/src/test/setup.ts` 一致：**只补 jsdom 缺的能力**，不改被测语义。
+// 两件事必做：① 装 antd-mobile 的 React 19 兼容层（与线上 main.tsx 同款，否则命令式 API 静默不渲染）；
+// ② 每个用例后 cleanup（触发 effect cleanup：abort 流、停重连循环，避免 vitest 卡在 teardown）。
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
@@ -35,6 +40,7 @@ if (typeof window !== "undefined" && !window.matchMedia) {
 
 // antd-mobile 的 Popup / ImageViewer 走 rc-util，jsdom 无 ResizeObserver（同桌面端）
 if (typeof window !== "undefined" && !("ResizeObserver" in window)) {
+  /** ResizeObserver 的最小替身：Popup/ImageViewer 只用到这三个方法（空实现即可）。 */
   class ResizeObserverStub {
     observe(): void {}
     unobserve(): void {}
@@ -45,6 +51,7 @@ if (typeof window !== "undefined" && !("ResizeObserver" in window)) {
 
 // ImageViewer / 图片懒加载路径会读 IntersectionObserver
 if (typeof window !== "undefined" && !("IntersectionObserver" in window)) {
+  /** IntersectionObserver 的最小替身（多一个 `takeRecords`：懒加载路径会读它）。 */
   class IntersectionObserverStub {
     observe(): void {}
     unobserve(): void {}

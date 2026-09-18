@@ -26,16 +26,19 @@ import type {
   TokenData,
 } from "../types/api";
 
+/** 拆信封：`{code,data,message}` → `data`（失败时 axios 已 reject，不会走到这里）。 */
 async function unwrap<T>(promise: Promise<{ data: Envelope<T> }>): Promise<T> {
   const resp = await promise;
   return resp.data.data;
 }
 
+/** 分页结果（**契约**：接口返回数组 + `X-Total-Count` 头，由 `unwrapPage` 拼成这个形状）。 */
 export interface PageResult<T> {
   items: T[];
   total: number;
 }
 
+/** 分页入参（offset/limit 口径；页面各 API 在此基础上追加自己的筛选字段）。 */
 export interface ListParams {
   offset?: number;
   limit?: number;
@@ -49,6 +52,7 @@ async function unwrapPage<T>(promise: Promise<{ data: Envelope<T[]>; headers: un
   return { items: resp.data.data, total };
 }
 
+/** 认证域（注册 / 登录 / 身份 / 登出；续签由 `services/http.ts` 的拦截器负责，不在这里）。 */
 export const authApi = {
   register: (payload: { org_name: string; username: string; password: string }) =>
     unwrap<{ user_id: string; org_id: string; role: string }>(http.post("/auth/register", payload)),
@@ -61,6 +65,7 @@ export const authApi = {
   logout: () => unwrap<Record<string, never>>(http.post("/auth/logout")),
 };
 
+/** 成员管理域（admin 专属；可创建的角色只有 reviewer/operator，见 backend `ASSIGNABLE_ROLES`）。 */
 export const membersApi = {
   list: (params?: ListParams) => unwrapPage<Member>(http.get("/users", { params })),
   create: (payload: { username: string; password: string; role: "reviewer" | "operator" }) =>
@@ -68,6 +73,7 @@ export const membersApi = {
   disable: (id: string) => unwrap<Member>(http.post(`/users/${id}/disable`)),
 };
 
+/** 商品域（列表 / 详情 / 增改 / 彻底删除 / 触发生成 / CSV 导入）。 */
 export const productsApi = {
   list: (params?: ListParams & { status?: string }) => unwrapPage<Product>(http.get("/products", { params })),
   get: (id: string) => unwrap<Product>(http.get(`/products/${id}`)),
@@ -89,6 +95,7 @@ export const productsApi = {
   },
 };
 
+/** OSS 图片直传域（两步：换预签名 URL → 客户端直传，字节不经过 backend）。 */
 export const ossApi = {
   /** 第一步：换预签名 PUT URL（登录态；需 product_id + content_type）。 */
   presign: (payload: { product_id: string; filename: string; content_type: string }) =>
@@ -102,16 +109,19 @@ export const ossApi = {
     getPlatform().putBinary(uploadUrl, contentType, file),
 };
 
+/** 已保存图文域（版本列表与最新版；空列表 = 还没批准过任何版本）。 */
 export const contentsApi = {
   list: (productId: string) => unwrap<ContentVersion[]>(http.get(`/products/${productId}/contents`)),
   latest: (productId: string) =>
     unwrap<ContentVersion | null>(http.get(`/products/${productId}/contents/latest`)),
 };
 
+/** AI 思考轨迹域（backend 只读 `schema_pa_ai.evaluation_logs`，正序返回）。 */
 export const evaluationLogsApi = {
   list: (productId: string) => unwrap<EvaluationLog[]>(http.get(`/products/${productId}/evaluation-logs`)),
 };
 
+/** 审批域（列表 / 详情 / 批准 / 驳回 / 补投 / 深链解析）。 */
 export const approvalsApi = {
   /**
    * 列表：`status` 缺省 = pending（backend 兼容约定）；
@@ -145,6 +155,7 @@ export const approvalsApi = {
   deeplink: (ticket: string) => unwrap<DeeplinkResult>(http.get("/approvals/deeplink", { params: { ticket } })),
 };
 
+/** 合规词库 / 规则域（**读对 reviewer 开放，写仅 admin**：全局配置影响所有组织）。 */
 export const complianceApi = {
   words: (params?: ListParams & { severity?: string; activeOnly?: boolean; keyword?: string }) =>
     unwrapPage<ComplianceWord>(
@@ -185,6 +196,7 @@ export const complianceApi = {
   preview: (text: string) => unwrap<CompliancePreviewResult>(http.post("/compliance/preview", { text })),
 };
 
+/** 运维面域（**只读**：`overview`/`dlq` 不改任何状态；唯一写操作是带审计的「终止卡住任务」）。 */
 export const opsApi = {
   overview: () => unwrap<OpsOverview>(http.get("/ops/overview")),
   dlq: (domain: string, limit = 20) => unwrap<DlqEntries>(http.get("/ops/dlq", { params: { domain, limit } })),

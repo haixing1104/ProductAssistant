@@ -11,6 +11,7 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { authApi } from "@pa/core/api";
 import { canApprove, useAuthStore } from "@pa/core/store/authStore";
 
+/** 底部 Tab 外壳（列表类页面的公共布局）；刷新后缺身份时从 `/auth/me` 补权威角色。 */
 export default function TabShell() {
   const navigate = useNavigate();
   const location = useLocation();

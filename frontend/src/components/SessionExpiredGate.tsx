@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { AUTH_EXPIRED_EVENT } from "../services/http";
 
+/** 会话过期弹窗宿主（挂一次即可）：订阅 `AUTH_EXPIRED_EVENT`，确认后带 `reason=expired` 回登录页。 */
 export default function SessionExpiredGate() {
   const [open, setOpen] = useState(false);
 

@@ -36,15 +36,23 @@ jest.mock("@pa/core/services/sse", () => ({
 }));
 jest.mock("../platform/pickFile", () => ({ pickCsvFile: jest.fn(), pickImageFile: jest.fn() }));
 
+/** 商品域桩（get/generate：按钮态与刷新依赖它们）。 */
 const mockProducts = productsApi as unknown as { get: jest.Mock; generate: jest.Mock };
+/** 审批域桩（复盘查询必须带 `status=all` —— 本文件的守护之一）。 */
 const mockApprovals = approvalsApi as unknown as { list: jest.Mock };
+/** 已保存图文桩（驳回后要看得到内容）。 */
 const mockContents = contentsApi as unknown as { list: jest.Mock };
+/** 思考轨迹桩。 */
 const mockTraces = evaluationLogsApi as unknown as { list: jest.Mock };
+/** 流连接器桩：只统计「连了几次」（= 组件是否重挂载）。 */
 const mockConnect = connectProductStream as unknown as jest.Mock;
 
+/** SafeAreaProvider 的初始度量（jsdom 无原生安全区）。 */
 const insets = { top: 0, left: 0, right: 0, bottom: 0 };
+/** iPhone 14 逻辑分辨率。 */
 const frame = { x: 0, y: 0, width: 390, height: 844 };
 
+/** 造一个最小可信的商品（默认草稿态；用 overrides 指定进行中/失败等分支）。 */
 function product(overrides: Partial<Product> = {}): Product {
   return {
     id: "p-1",
@@ -59,6 +67,7 @@ function product(overrides: Partial<Product> = {}): Product {
   };
 }
 
+/** 挂载商品详情（独立 QueryClient + 关重试；⚠️ RNTL v14 的 render 必须 await）。 */
 async function renderScreen() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

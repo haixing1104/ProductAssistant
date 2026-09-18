@@ -26,8 +26,10 @@ vi.mock("react-router-dom", () => ({
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));
 
+/** 本文件只桩 `approvalsApi`（审批列表页不应触达其它域）。 */
 const mockApi = vi.mocked(approvalsApi);
 
+/** 造一张最小可信的审批单（默认 pending + 高价值转人工）。 */
 function approval(overrides: Partial<Approval> = {}): Approval {
   return {
     id: "a-1",
@@ -45,6 +47,7 @@ function approval(overrides: Partial<Approval> = {}): Approval {
   };
 }
 
+/** 挂载审批列表（独立 QueryClient + 关重试）。 */
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

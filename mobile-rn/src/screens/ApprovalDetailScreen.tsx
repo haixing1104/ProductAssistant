@@ -38,6 +38,7 @@ interface Props {
   onBack: () => void;
 }
 
+/** 审批详情（通知深链落地页）：先校验票据定位单据，再展示复盘并给出「批准/驳回」。 */
 export default function ApprovalDetailScreen({ approvalId, ticket, onBack }: Props) {
   const qc = useQueryClient();
   const role = useAuthStore((state) => state.user?.role);

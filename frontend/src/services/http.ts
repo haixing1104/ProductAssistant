@@ -11,6 +11,12 @@ import { useAuthStore } from "../store/authStore";
 
 import { AUTH_EXPIRED_EVENT, apiUrl, getPlatform } from "./platform";
 
+/**
+ * 全局 axios 实例（唯一出口，业务层只用 `api/index.ts` 封装的域方法）。
+ *
+ * 基址**在请求拦截器里现算**（见下方注释）：不能在 `create()` 里定死 ——
+ * RN 的平台实现可能晚于本模块 import 才装上，写死会退化成空串（相对 URL 在原生端无效）。
+ */
 export const http = axios.create({
   // 基址在请求拦截器里按当前平台算（见下方 setBaseURL 注释）：
   // Web = ""（同源相对路径，dev 走 vite 代理）；RN = EXPO_PUBLIC_API_BASE_URL（原生没有代理）
@@ -50,6 +56,7 @@ http.interceptors.request.use((config) => {
 // ---------- 静默续签（单飞） ----------
 let refreshing: Promise<boolean> | null = null;
 
+/** 真正发续签请求（**只应由 `refreshSession` 调用**，以保住单飞语义）。 */
 async function rawRefresh(): Promise<boolean> {
   try {
     const resp = await http.post("/auth/refresh", null, { headers: CSRF_HEADER });
@@ -93,8 +100,9 @@ export function restoreSession(): Promise<boolean> {
 // ---------- 会话过期（友好提示，非硬跳转） ----------
 let expiredNotified = false;
 
+/** 记录"从哪来"（委托平台端口：Web 写 sessionStorage，RN 写 AsyncStorage）。 */
 function rememberReturnUrl(): void {
-  // 记录"从哪来"：Web 写 sessionStorage（原逻辑逐行搬进 platform.ts）；RN 写 AsyncStorage。
+  // 原逻辑逐行搬进 platform.ts，这里只做转发（见上方注释）
   getPlatform().rememberReturnUrl();
 }
 

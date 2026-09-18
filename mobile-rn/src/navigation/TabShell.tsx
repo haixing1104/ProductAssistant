@@ -17,6 +17,7 @@ import ApprovalsScreen from "../screens/ApprovalsScreen";
 import MeScreen from "../screens/MeScreen";
 import ProductsScreen from "../screens/ProductsScreen";
 
+/** 底部 Tab 参数表（与 H5 的 TabShell 三个 Tab 一致）。 */
 export type TabParamList = {
   Products: undefined;
   Approvals: undefined;
@@ -34,6 +35,7 @@ interface Props {
   onSignedOut: () => void;
 }
 
+/** 底部 Tab 外壳：承载三个列表页，并把「打开详情」的回调注入子屏（RN 不能像 H5 那样用 Link）。 */
 export default function TabShell({ onOpenProduct, onOpenApproval, onSignedOut }: Props) {
   const Tab = createBottomTabNavigator<TabParamList>();
   const role = useAuthStore((state) => state.user?.role);

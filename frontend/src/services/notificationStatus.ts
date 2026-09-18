@@ -5,12 +5,14 @@
 // 前端只需认字段，但**不要**假设存在 `kind`。
 import type { ApprovalNotification } from "../types/api";
 
+/** 渠道枚举 → 中文（与 backend `notification_outbox.channel` 对齐）。 */
 const CHANNEL_LABELS: Record<string, string> = {
   email: "邮件",
   feishu: "飞书",
   dingtalk: "钉钉",
 };
 
+/** 渠道 → 中文名（未知渠道原样透出，便于发现后端新增通道）。 */
 export function channelLabel(channel: string): string {
   return CHANNEL_LABELS[channel] ?? channel;
 }

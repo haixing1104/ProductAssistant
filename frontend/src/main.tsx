@@ -1,3 +1,13 @@
+// 应用装配（桌面端运营工作台）。
+//
+// 组成（与 mobile-h5/src/main.tsx 对照看）:
+//   QueryClientProvider → React Query（缓存口径：retry 1、不做 focus 自动刷新）
+//   BrowserRouter       → 路由树 + 会话/角色守卫
+//   ConfigProvider      → antd 中文文案（zhCN）
+//   SessionExpiredGate  → 会话过期友好提示（由用户确认后再离开，见 services/http.ts）
+//
+// 守卫顺序不可换：AuthGuard（登录态）→ RoleRoute（角色）→ 页面。
+// 前端守卫只是**体验**（提前拦住无权限入口），真正的拒绝永远在服务端 RBAC。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfigProvider, Result, Spin } from "antd";
 import zhCN from "antd/locale/zh_CN";
@@ -17,6 +27,8 @@ import ProductsPage from "./pages/ProductsPage";
 import { restoreSession } from "./services/http";
 import { useAuthStore } from "./store/authStore";
 
+/** React Query 单例：retry 1（弱网抖一次就重试，再多会掩盖真实故障）、
+ *  关掉 focus 自动刷新（工作台多是长表单/长文案场景，切窗口回来重拉会打断输入）。 */
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
@@ -74,6 +86,7 @@ function RoleRoute({ roles, children }: { roles: string[]; children: ReactNode }
   return <>{children}</>;
 }
 
+/** 路由树。`*` 兜底回首页：手打错 URL / 深链落到未知路径时不出现白屏。 */
 function Root() {
   return (
     <ConfigProvider locale={zhCN}>

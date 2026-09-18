@@ -37,9 +37,12 @@ import QueryError from "../components/QueryError";
 import { ProductStatusTag } from "../components/StatusTag";
 import { formatPrice } from "@pa/core/services/mobileFormat";
 
+/** 触底加载的每页条数（与桌面端 pageSize 同口径，便于两端结果条数对齐）。 */
 const PAGE_SIZE = 10;
+/** CSV 模板表头（导入入口给用户下载空模板用；字段顺序与服务端解析一致）。 */
 const CSV_TEMPLATE = "sku_code,title,base_price,stock_status,raw_images";
 
+/** 商品列表页（卡片列表 + 筛选/下拉刷新/触底加载 + 新建编辑 + CSV 导入 + 触发生成）。 */
 export default function ProductsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();

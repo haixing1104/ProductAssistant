@@ -20,6 +20,7 @@ interface BaseProps {
   style?: ViewStyle;
 }
 
+/** 带标签的单行输入（错误文案优先于帮助文案显示，二者不同时出现）。 */
 export function LabeledInput({
   label,
   value,
@@ -51,6 +52,7 @@ export function LabeledInput({
   );
 }
 
+/** 带标签的多行输入（驳回意见、商品描述用；`maxLength` 与后端字段上限对齐时传入）。 */
 export function LabeledTextArea({
   label,
   value,

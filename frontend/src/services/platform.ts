@@ -25,6 +25,7 @@ import { frameOutcome, parseSseFrame, type SseFrame } from "./sse";
 /** 一次 SSE 连接的走向（与 backend 的流生命周期一一对应；调用方据此决定是否重连）。 */
 export type PaSseOutcome = "terminal" | "ready" | "idle" | "error" | "eof";
 
+/** 平台端口的一次连流请求（地址已含短时票据；`lastEventId` 用于断线续传）。 */
 export interface PaSseRequest {
   /** 已含票据的完整地址（Web 是相对路径；RN 是绝对地址） */
   url: string;
@@ -34,6 +35,7 @@ export interface PaSseRequest {
   signal: AbortSignal;
 }
 
+/** 一次连流的收敛结果：`outcome` 是**唯一的判断依据**，`failure` 只用于 UI 文案。 */
 export interface PaSseAttempt {
   outcome: PaSseOutcome;
   /** `outcome === "error"` 时的可读原因（进 UI 文案，例如 `HTTP 403`） */
@@ -47,6 +49,12 @@ export interface PaSseAttempt {
  */
 export type PaUploadFile = File | { uri: string; name: string; type: string };
 
+/**
+ * 共享契约层的**平台端口**：6 个差异点的唯一出口。
+ *
+ * 红线：新增平台差异一律加在这里（Web 默认实现 + RN 实现各一份），
+ * 不要在 `http.ts` / `sse.ts` 里写 `if (isRN)` —— 那正是"复制两份"事故的起点。
+ */
 export interface PaPlatform {
   readonly name: "web" | "rn";
 
@@ -99,6 +107,7 @@ export function resetPlatform(): void {
   current = null;
 }
 
+/** 取当前平台实现（未覆盖时返回 Web 默认实现 —— 桌面端与 H5 都走这条）。 */
 export function getPlatform(): PaPlatform {
   return current ?? WEB_PLATFORM;
 }

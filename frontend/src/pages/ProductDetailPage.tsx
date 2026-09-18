@@ -51,6 +51,7 @@ import {
 import { canWriteProducts, useAuthStore } from "../store/authStore";
 import type { Approval, ContentVersion, Product } from "../types/api";
 
+/** 允许的图片类型（与 backend `services/oss.ALLOWED_CONTENT_TYPES` 对齐；此处用于选图时预检）。 */
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 /**
@@ -104,6 +105,14 @@ export function detailRefetchInterval(current?: Product): number | false {
   return inFlight ? 5000 : false;
 }
 
+/**
+ * 商品详情页（本项目最复杂的一屏）：基础信息 / 生成与实时流 / 已保存图文 / 思考轨迹 /
+ * 审批与驳回复盘 / 商品图素材。
+ *
+ * 两处历史事故的护栏请勿移除:
+ *   ① `streamNonce`：命中终态后连接器不会自动复活，重新生成必须换 key 重挂载；
+ *   ② `detailRefetchInterval`：SSE 可能断，进行中要轮询兜底，否则按钮永久「生成中…」。
+ */
 export default function ProductDetailPage() {
   const { productId = "" } = useParams();
   const qc = useQueryClient();

@@ -136,6 +136,11 @@ async def test_purge_reports_enqueue_failure_but_keeps_deletion(
     """Redis 不可用时：删除仍然完成（审计已落库），但 ``purge_enqueued=False`` 必须回传。"""
 
     def _boom(self, **_kwargs):
+        """把「通知 ai-engine 清理」打成必然失败（等价于 Redis 不可用）。
+
+        关键契约: 清理解除必须与删除**解耦** —— 入队失败只影响 ``purge_enqueued``，
+        已经落库的删除与审计**不得回滚**（回滚就等于「删了一半」）。
+        """
         raise ConnectionError("redis down")
 
     monkeypatch.setattr(AIEngineClient, "trigger_product_purge", _boom)

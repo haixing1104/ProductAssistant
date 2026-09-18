@@ -74,6 +74,11 @@ def test_is_stale_judgement(seeded_org: SeededOrg):
     now = datetime.now(timezone.utc)
 
     def _job(status: str, updated_at: datetime) -> GenerationJob:
+        """造一个内存态任务行（只填 ``is_stale`` 判据用到的字段）。
+
+        为什么不用真库: 本用例只验证「超期判据」这一个纯函数，构造真实行会让
+        时间戳受 DB 时钟/时区影响；这里显式传入 ``updated_at`` 才能钉住边界。
+        """
         return GenerationJob(
             id=uuid.uuid4(),
             thread_id=uuid.uuid4(),

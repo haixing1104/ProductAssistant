@@ -49,6 +49,13 @@ export function detailRefetchInterval(current?: Product): number | false {
   return inFlight ? 5000 : false;
 }
 
+/**
+ * 商品详情（RN 版，最重的一屏）：基础信息 / 生成与实时流 / 已保存图文 / 思考轨迹 /
+ * 审批复盘 / 商品图素材 + 底部固定操作栏。
+ *
+ * 两条同源护栏: 重新生成必须换 key 重挂载流（`streamNonce`）；
+ * 进行中靠 `detailRefetchInterval` 兜底轮询，避免弱网下按钮永久「生成中…」。
+ */
 export default function ProductDetailScreen({ productId, onBack }: { productId: string; onBack: () => void }) {
   const qc = useQueryClient();
   const role = useAuthStore((state) => state.user?.role);

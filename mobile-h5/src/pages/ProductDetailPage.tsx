@@ -48,6 +48,7 @@ import StreamingPanel from "../components/StreamingPanel";
 import { ApprovalStatusTag, ProductStatusTag, ScoreTag } from "../components/StatusTag";
 import { formatPrice, formatTime, toTagColor } from "@pa/core/services/mobileFormat";
 
+/** 允许的图片类型（与 backend `services/oss.ALLOWED_CONTENT_TYPES` 对齐；选图前预检）。 */
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 /**
@@ -61,6 +62,13 @@ export function detailRefetchInterval(current?: Product): number | false {
   return inFlight ? 5000 : false;
 }
 
+/**
+ * 商品详情（移动版，最重的一屏）：基础信息 / 生成与实时流 / 已保存图文 / 思考轨迹 /
+ * 审批复盘 / 商品图素材；底部固定操作栏。
+ *
+ * 与桌面端同源的两条护栏: 重新生成必须换 key 重挂载流（`streamNonce`）；
+ * 进行中靠 `detailRefetchInterval` 兜底轮询，避免弱网下按钮永久「生成中…」。
+ */
 export default function ProductDetailPage() {
   const { productId = "" } = useParams();
   const navigate = useNavigate();

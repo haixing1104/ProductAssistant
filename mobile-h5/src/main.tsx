@@ -1,3 +1,11 @@
+// 应用装配（移动端 H5，与桌面端 `frontend/src/main.tsx` 对照看）。
+//
+// 与桌面端的差异只有“装配件”，契约层是**同一份**（`@pa/core/*` → ../frontend/src/*）:
+//   TabShell       → 底部 TabBar（桌面是左侧 Menu）
+//   SessionGate    → 会话过期弹窗（共享层事件；桌面叫 SessionExpiredGate）
+//   ForegroundRefresh → 回前台刷新（**移动端特有**，见下方注释）
+//
+// ⚠️ `installAntdMobileReact19Shim()` 必须在**任何 antd-mobile 命令式 API 使用之前**调用。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfigProvider, Result, SpinLoading } from "antd-mobile";
 import zhCN from "antd-mobile/es/locales/zh-CN";
@@ -23,6 +31,7 @@ import "./styles/global.css";
 // React 19 移除了 ReactDOM.render / unmountComponentAtNode，antd-mobile v5 默认实现会静默不渲染。
 installAntdMobileReact19Shim();
 
+/** React Query 单例：与桌面端同口径（retry 1、不做 focus 刷新；移动端另由 ForegroundRefresh 兜底）。 */
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
@@ -92,6 +101,7 @@ function ForegroundRefresh() {
   return null;
 }
 
+/** 路由树：列表类页面走 TabShell（带底部 TabBar），详情类页面整屏（移动端返回手势更自然）。 */
 function Root() {
   const location = useLocation();
   return (

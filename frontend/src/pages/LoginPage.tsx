@@ -21,6 +21,7 @@ interface FormValues {
   password: string;
 }
 
+/** 登录 / 注册同页（`?reason=expired` 时提示会话过期并回跳原页）。 */
 export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);

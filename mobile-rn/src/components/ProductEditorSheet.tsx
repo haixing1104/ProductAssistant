@@ -31,8 +31,10 @@ interface Values {
   stock_status: string;
 }
 
+/** 空表单初值（新建时用；编辑时由 `useEffect` 灌入目标商品）。 */
 const EMPTY: Values = { sku_code: "", title: "", base_price: "", stock_status: "in_stock" };
 
+/** 商品新建/编辑底部弹层（`target` 为受控开关：null=关闭，「new」=新建，Product=编辑）。 */
 export default function ProductEditorSheet({ target, onClose, onSaved }: Props) {
   const qc = useQueryClient();
   const [values, setValues] = useState<Values>(EMPTY);

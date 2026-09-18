@@ -14,6 +14,7 @@ interface Props {
   emptyText?: string;
 }
 
+/** 图文渲染：文本块连续展示、图片块统一收集成缩略图（窄屏上「图挨着图」比「图插在段落中间」更好读）。 */
 export default function BlockView({ blocks, emptyText = "（无内容）" }: Props) {
   const list = blocks ?? [];
   if (list.length === 0) {

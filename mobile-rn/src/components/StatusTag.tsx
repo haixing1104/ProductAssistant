@@ -8,6 +8,7 @@ import { scoreColor } from "@pa/core/services/contentSnapshot";
 import { approvalStatusLabel, productStatusColor, productStatusLabel } from "@pa/core/services/productMeta";
 import { toTagColor } from "@pa/core/services/mobileFormat";
 
+/** 商品状态 Tag（颜色经 `toTagColor` 翻译，与 H5/桌面端同源同义）。 */
 export function ProductStatusTag({ status }: { status?: string | null }) {
   if (!status) return null;
   return <Tag color={toTagColor(productStatusColor(status))}>{productStatusLabel(status)}</Tag>;

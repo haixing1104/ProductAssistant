@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors, font, space, TOUCH_TARGET } from "./theme";
 
+/** 一个标签项（`title` 可直接带计数，如「待我处理（3）」）。 */
 export interface TabItem {
   key: string;
   title: string;
@@ -18,6 +19,7 @@ interface Props {
   testID?: string;
 }
 
+/** 等宽标签切换（受控：`activeKey` + `onChange`，与 antd-mobile Tabs 同用法）。 */
 export default function Tabs({ items, activeKey, onChange, testID }: Props) {
   return (
     <View style={styles.bar} testID={testID}>

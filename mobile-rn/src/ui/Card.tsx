@@ -16,6 +16,7 @@ interface Props {
   testID?: string;
 }
 
+/** 卡片（标题 + 右上 extra + 内容区）；整卡可点，卡内按钮需自行 `stopPropagation`。 */
 export default function Card({ title, extra, children, onPress, style, testID }: Props) {
   const content = (
     <>

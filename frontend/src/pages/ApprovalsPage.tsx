@@ -47,6 +47,14 @@ import type { Approval } from "../types/api";
 
 type Tab = "pending" | "approved" | "rejected";
 
+/**
+ * 审批中心：待处理 / 已批准 / 已驳回三个 tab + 详情抽屉（含票据深链落点）。
+ *
+ * 三条语义护栏（详见文件顶部与 README）:
+ *   · 列表**不放「批准」按钮**（误触代价 = 直接上架），动作全在抽屉里；
+ *   · 复盘查询必须带 `status=all`，否则已定案的单查不到；
+ *   · 带命中点放行必须写理由（写 `approval_overrides` 审计）。
+ */
 export default function ApprovalsPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();

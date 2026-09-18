@@ -1,8 +1,3 @@
-// App 根装配（**P0 阶段的最小骨架**：证明工具链 + 共享契约层解析 + 单例锁定都通了）。
-//
-// P4 会把这里换成完整装配：
-//   SafeAreaProvider → QueryClientProvider → NavigationContainer(linking 深链) → 路由树 → SessionGate
-// 现在先保留"能跑、能测"的最小形态，避免一次性写一大坨还没验证工具链的代码。
 // App 根装配（P0 时的占位骨架已替换为真实路由树）。
 //
 // 组成（与 mobile-h5/src/main.tsx 对照看）:
@@ -23,6 +18,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import RootNavigator from "./src/navigation/RootNavigator";
 import { FeedbackHost } from "./src/ui/feedback";
 
+/** React Query 单例（与桌面端/H5 同口径：retry 1、不做 focus 刷新；回前台刷新见 `ForegroundRefresh`）。 */
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
@@ -44,6 +40,7 @@ function ForegroundRefresh() {
   return null;
 }
 
+/** App 根：安全区 → React Query → 路由树 + 反馈宿主 + 回前台刷新 + 状态栏。 */
 export default function App() {
   return (
     <SafeAreaProvider>

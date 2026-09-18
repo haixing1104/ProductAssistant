@@ -51,8 +51,11 @@ interface ProductFormValues {
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 /** 单图上限（与 backend `BACKEND_OSS_MAX_UPLOAD_BYTES` 默认 10MB 对齐；以接口返回的为准）。 */
 const FALLBACK_MAX_BYTES = 10 * 1024 * 1024;
+/** 前端预检的 CSV 行数上限。比 backend `csv_import.CSV_MAX_ROWS`（2000）**更严**：
+ *  客户端先拦住大文件，避免用户上传后白等一轮才被服务端拒。 */
 const CSV_MAX_ROWS = 500;
 
+/** 商品列表 + 新建/编辑/CSV 导入/触发生成（写操作按角色禁用，真正的拒绝在服务端）。 */
 export default function ProductsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();

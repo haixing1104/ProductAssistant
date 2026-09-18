@@ -10,6 +10,7 @@ interface Props {
   compact?: boolean;
 }
 
+/** 各渠道投递状态（紧凑模式只给 Tag + Tooltip：表格列宽有限，失败原因不占位）。 */
 export default function DeliverySummary({ notes, compact = false }: Props) {
   if (!notes || notes.length === 0) {
     return <Typography.Text type="secondary">未配置外部通知</Typography.Text>;

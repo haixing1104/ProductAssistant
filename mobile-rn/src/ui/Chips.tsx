@@ -6,6 +6,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { colors, font, radius, space, TOUCH_TARGET } from "./theme";
 
+/** 一个选项（`value` 参与请求参数，`label` 只用于展示）。 */
 export interface ChipOption {
   value: string;
   label: string;
@@ -20,6 +21,7 @@ interface Props {
   testID?: string;
 }
 
+/** 单选 Chips（受控；`scrollable` 用于选项较多的筛选行）。 */
 export default function Chips({ options, value, onChange, scrollable = false, testID }: Props) {
   const body = (
     <View style={styles.row}>

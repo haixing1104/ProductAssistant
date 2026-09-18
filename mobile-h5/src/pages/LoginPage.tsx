@@ -22,6 +22,7 @@ interface FormValues {
   password: string;
 }
 
+/** 登录/注册同页（移动版）：登录成功后记住组织名，`?reason=expired` 时提示会话过期。 */
 export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [loading, setLoading] = useState(false);

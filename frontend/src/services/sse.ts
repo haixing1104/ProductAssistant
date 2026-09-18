@@ -90,6 +90,7 @@ export function streamUrl(productId: string): string {
 // RN 侧在 `rnPlatform.openSse` 里用 expo/fetch 实现同一契约（同样能拿到注释帧），
 // 因此上面这些「什么算终态、什么时候该停」的判断**两端共用一份**。
 
+/** 连流过程的回调面（各回调职责独立，调用方只实现关心的几个）。 */
 export interface StreamHandlers {
   /** 每帧回调（注释帧也会来） */
   onFrame: (frame: SseFrame) => void;
@@ -105,6 +106,7 @@ export interface StreamHandlers {
   onFatal?: (reason: string) => void;
 }
 
+/** `connectProductStream` 的完整入参（商品 + 回调 + 重试策略 + 中断信号）。 */
 export interface StreamOptions extends StreamHandlers {
   productId: string;
   /** 续连/重试间隔（毫秒；默认 1500，测试注入小值以去掉墙钟依赖） */
@@ -123,6 +125,7 @@ export interface StreamState {
   stopped: boolean;
 }
 
+/** 重连/退避用的等待（抽成一行：测试注入 `retryDelayMs: 0` 即可去掉墙钟依赖）。 */
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**

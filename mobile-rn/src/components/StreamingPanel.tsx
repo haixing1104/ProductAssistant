@@ -32,6 +32,12 @@ interface Props {
   height?: number;
 }
 
+/**
+ * 实时生成面板（RN 版）：打字机正文 + 阶段 + 配图。
+ *
+ * 语义与 H5/桌面端**逐条一致**（`hitl.waiting` 是终态 / `ready` 不重连 / 注释帧三态），
+ * 差异只在渲染：正文固定高度 + 自动滚底（用户往上翻时不打断）、配图点开放大。
+ */
 export default function StreamingPanel({
   productId,
   reconnectDelayMs,

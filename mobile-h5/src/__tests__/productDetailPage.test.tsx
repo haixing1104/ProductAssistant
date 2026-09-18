@@ -16,6 +16,7 @@ import type { Product } from "@pa/core/types/api";
 
 import ProductDetailPage, { detailRefetchInterval } from "../pages/ProductDetailPage";
 
+/** 记录流连接次数（用例据此断言「点生成必须重开连接」）。 */
 const connectSpy = vi.fn();
 
 vi.mock("@pa/core/services/sse", async () => {
@@ -38,6 +39,7 @@ vi.mock("@pa/core/api", () => ({
   ossApi: { presign: vi.fn(), put: vi.fn() },
 }));
 
+/** 记录导航调用（用例据此断言「失败/未授权时不跳转」）。 */
 const navigateSpy = vi.fn();
 vi.mock("react-router-dom", () => ({
   useParams: () => ({ productId: "p-1" }),
@@ -45,9 +47,12 @@ vi.mock("react-router-dom", () => ({
   useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));
 
+/** 商品域桩（get/generate：生成按钮态与刷新依赖它们）。 */
 const mockProducts = vi.mocked(productsApi);
+/** 审批域桩（复盘查询必须带 `status=all` —— 本文件的第 ③ 条守护）。 */
 const mockApprovals = vi.mocked(approvalsApi);
 
+/** 造一个最小可信的商品（默认草稿态；用 overrides 指定进行中/失败等分支）。 */
 function product(overrides: Partial<Product> = {}): Product {
   return {
     id: "p-1",
@@ -67,6 +72,7 @@ function product(overrides: Partial<Product> = {}): Product {
 
 let queryClient: QueryClient | null = null;
 
+/** 挂载商品详情；QueryClient 提到外层，供 afterEach clear 掉兜底轮询定时器。 */
 function renderPage() {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

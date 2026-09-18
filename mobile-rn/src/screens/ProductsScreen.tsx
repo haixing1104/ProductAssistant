@@ -32,11 +32,15 @@ import type { Product } from "@pa/core/types/api";
 
 import { pickCsvFile } from "../platform/pickFile";
 
+/** 触底加载每页条数（与 H5/桌面端同口径）。 */
 const PAGE_SIZE = 10;
+/** CSV 模板表头（导入入口下载空模板用）。 */
 const CSV_TEMPLATE = "sku_code,title,base_price,stock_status,raw_images";
 
+/** 状态筛选选项（「全部」+ 共享层的状态枚举，避免两处各写一份）。 */
 const STATUS_FILTERS = [{ value: "", label: "全部" }, ...PRODUCT_STATUS_FILTERS];
 
+/** 商品列表（RN 版）：卡片列表 + 状态筛选 + 下拉刷新 + 触底加载 + 新建编辑 + CSV 导入。 */
 export default function ProductsScreen({ onOpenDetail }: { onOpenDetail: (productId: string) => void }) {
   const qc = useQueryClient();
   const role = useAuthStore((state) => state.user?.role);

@@ -31,6 +31,7 @@ import { resolveDesktopBaseUrl } from "../platform/env";
 import { pathToRoute, routeToPath, type RouteTarget } from "./paths";
 import TabShell from "./TabShell";
 
+/** 根栈参数表（深链解析出来的目标最终落到这里；`ticket` 只做定位）。 */
 export type RootStackParamList = {
   Login: { expired?: boolean } | undefined;
   Tabs: undefined;
@@ -38,8 +39,10 @@ export type RootStackParamList = {
   ApprovalDetail: { approvalId: string; ticket?: string };
 };
 
+/** 导航引用：**只在导航容器就绪后**可用（会话过期回跳要据此判断能否立刻跳转）。 */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
+/** 原生栈导航器实例（header 全部自绘：用 `ui/NavBar`，两端标题条才能长得一样）。 */
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /**
@@ -62,6 +65,7 @@ const linking = {
   },
 };
 
+/** 根导航：会话恢复守卫 + 深链 + 会话过期回跳（与 H5 的 AuthGuard + 路由树同口径）。 */
 export default function RootNavigator() {
   const token = useAuthStore((state) => state.token);
   // 刷新后 token 在内存里丢了、但实现层的 refresh 存储仍有效 → 静默恢复一次（与 H5 的 AuthGuard 同口径）

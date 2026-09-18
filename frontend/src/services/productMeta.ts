@@ -11,6 +11,7 @@ export const STOCK_STATUS_LABELS: Record<string, string> = {
   preorder: "预售",
 };
 
+/** 库存状态 → 中文（未知值原样回显，便于发现后端新增枚举）。 */
 export function stockStatusLabel(value?: string | null): string {
   if (!value) return "";
   return STOCK_STATUS_LABELS[value] ?? value;
@@ -26,6 +27,7 @@ export const PRODUCT_STATUS_LABELS: Record<string, string> = {
   deleted: "已删除（历史）",
 };
 
+/** 商品状态 → 中文（未知值原样回显）。 */
 export function productStatusLabel(value?: string | null): string {
   if (!value) return "";
   return PRODUCT_STATUS_LABELS[value] ?? value;
@@ -41,6 +43,7 @@ export const PRODUCT_STATUS_COLORS: Record<string, string> = {
   deleted: "error",
 };
 
+/** 商品状态 → antd Tag 颜色（未知/空值回落 `default`，绝不抛错：颜色不该让页面崩）。 */
 export function productStatusColor(value?: string | null): string {
   if (!value) return "default";
   return PRODUCT_STATUS_COLORS[value] ?? "default";
@@ -65,6 +68,7 @@ export const APPROVAL_STATUS_LABELS: Record<string, string> = {
   rejected: "已驳回",
 };
 
+/** 审批状态 → 中文（未知值原样回显）。 */
 export function approvalStatusLabel(value?: string | null): string {
   if (!value) return "";
   return APPROVAL_STATUS_LABELS[value] ?? value;
@@ -77,17 +81,20 @@ export const SEVERITY_LABELS: Record<string, string> = {
   low: "低（提示）",
 };
 
+/** 严重级 → Tag 颜色（与 `SEVERITY_LABELS` 的「阻断/提示」措辞同源，红色只留给阻断级）。 */
 export const SEVERITY_COLORS: Record<string, string> = {
   high: "red",
   medium: "orange",
   low: "blue",
 };
 
+/** 严重级 → 中文（未知值原样回显）。 */
 export function severityLabel(value?: string | null): string {
   if (!value) return "";
   return SEVERITY_LABELS[value] ?? value;
 }
 
+/** 严重级 → antd Tag 颜色（未知/空值回落 `default`）。 */
 export function severityColor(value?: string | null): string {
   if (!value) return "default";
   return SEVERITY_COLORS[value] ?? "default";

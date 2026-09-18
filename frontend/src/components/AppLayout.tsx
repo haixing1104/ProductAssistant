@@ -23,6 +23,7 @@ const MENU_KEYS: Array<{ key: string; match: (path: string) => boolean }> = [
   { key: "/members", match: (p) => p.startsWith("/members") },
 ];
 
+/** 工作台骨架（左侧菜单 + 顶部身份 + 内容区）；刷新后缺身份时从 `/auth/me` 补权威角色。 */
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();

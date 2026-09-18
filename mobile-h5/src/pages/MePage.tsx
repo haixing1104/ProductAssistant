@@ -13,12 +13,14 @@ import { ROLE_LABEL, canApprove, isAdmin, useAuthStore } from "@pa/core/store/au
 import { desktopBaseUrl } from "@pa/core/services/mobileFormat";
 import { forgetOrg } from "../services/rememberOrg";
 
+/** 只在电脑端实现的模块（低频 + 表格密集）：这里只给浏览器入口，不做残缺的移动版。 */
 const DESKTOP_ONLY = [
   { path: "/compliance", label: "合规词库", roles: ["admin", "reviewer"] },
   { path: "/ops", label: "运维面板", roles: ["admin"] },
   { path: "/members", label: "用户管理", roles: ["admin"] },
 ];
 
+/** 「我的」页：身份/角色/审批权限 + 退出登录 + 清除记住的组织名 + 电脑端模块入口。 */
 export default function MePage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);

@@ -3,6 +3,7 @@
 // 前置：先在 backend 侧注册一个组织（或在用例里用 /auth/register 现开一个）。
 import { expect, test } from "@playwright/test";
 
+/** E2E 总开关：默认 skip —— 需要真实全栈（backend :8000 + 前端 :5173），启用方式见文件头。 */
 const RUN_E2E = process.env.PA_E2E === "1";
 
 test.skip(!RUN_E2E, "登录并进入商品列表（需 backend + 前端都在跑，且 PA_E2E=1）", async ({ page }) => {

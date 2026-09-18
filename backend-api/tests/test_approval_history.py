@@ -210,6 +210,12 @@ async def test_notifications_visible_after_delivery_failure(
         """总是失败的 sender（模拟 webhook 填错/网络不可达）。"""
 
         def send(self, payload: dict) -> str:  # noqa: ARG002
+            """模拟真实投递被渠道拒绝（webhook 401）。
+
+            为什么要抛 ``NotificationSendError`` 而不是 ``Exception``:
+                这条异常是「渠道明确拒绝」的语义（区别于网络抖动）—— 投递器据此决定
+                是否记 ``failed`` 并在前端显示真实原因；抛错类型不对会把断言变成假通过。
+            """
             raise NotificationSendError("群机器人 webhook 返回 401 invalid token")
 
     thread_id = seed_job(backend_dsn, org_id=seeded_org.org_id, product_id=seeded_org.product_id)

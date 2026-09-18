@@ -5,6 +5,7 @@ import { useEffect } from "react";
 
 import { AUTH_EXPIRED_EVENT } from "@pa/core/services/http";
 
+/** 会话过期弹窗宿主（挂一次即可）：订阅共享层的 `AUTH_EXPIRED_EVENT`。 */
 export default function SessionGate() {
   useEffect(() => {
     const show = () => {

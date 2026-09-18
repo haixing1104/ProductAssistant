@@ -16,6 +16,7 @@ interface Props {
   compact?: boolean;
 }
 
+/** 投递状态（移动版）：手机没有 hover，失败原因改点按 `Popover` 展开。 */
 export default function DeliveryNotes({ notes, compact = false }: Props) {
   if (!notes || notes.length === 0) {
     return <Tag fill="outline">未配置外部通知</Tag>;

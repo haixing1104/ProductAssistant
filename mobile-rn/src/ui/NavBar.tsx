@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { colors, font, space, TOUCH_TARGET } from "./theme";
 
+/** 页面标题条（左侧返回 / 中间标题 / 右侧操作区）；Tab 顶级页传 `back = null` 不显示返回。 */
 export function NavBar({
   title,
   back,
@@ -56,6 +57,7 @@ export function NavBar({
   );
 }
 
+/** 提示色调映射（与 antd-mobile NoticeBar 的 default/info/alert/error 同义：底部提示要一眼分辨严重性）。 */
 const NOTICE_TONES = {
   default: { bg: "#f5f5f5", fg: colors.text },
   info: { bg: "#e7f1ff", fg: "#1677ff" },
@@ -63,6 +65,7 @@ const NOTICE_TONES = {
   error: { bg: "#ffe9ea", fg: colors.danger },
 } as const;
 
+/** 一行提示条（替代 H5 的 `NoticeBar`；色调语义见 `NOTICE_TONES`）。 */
 export function NoticeBar({
   content,
   color = "default",

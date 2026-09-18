@@ -33,6 +33,7 @@ export function Sheet({
   );
 }
 
+/** 动作面板里的一项（`danger` 用红色文字：删除这类不可逆操作必须视觉区分）。 */
 export interface SheetAction {
   key: string;
   text: string;

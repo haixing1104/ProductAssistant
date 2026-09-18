@@ -5,6 +5,7 @@
 // 各写各的色值 = 同一个后端状态在两端看起来不一样，审核员在两台设备上会做不同判断。
 import type { MobileTagColor } from "@pa/core/services/mobileFormat";
 
+/** 语义色板（**唯一色值来源**：页面/组件不得手写色值，否则同一状态在两端看起来不一样）。 */
 export const colors = {
   primary: "#1677ff",
   success: "#00b578",
@@ -23,8 +24,10 @@ export const colors = {
 /** 间距（4 的倍数，与 antd-mobile 的视觉节奏一致） */
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
 
+/** 圆角档位（与 antd-mobile 的视觉节奏一致：卡片 md、弹层 lg）。 */
 export const radius = { sm: 6, md: 8, lg: 12 } as const;
 
+/** 字号档位（统一从这里取；页面内不要出现裸数字字号）。 */
 export const font = { xs: 12, sm: 13, md: 15, lg: 17, xl: 20 } as const;
 
 /** 触控目标下限（iOS HIG 44pt；Android 48dp 由各组件 hitSlop 补足） */
@@ -33,6 +36,7 @@ export const TOUCH_TARGET = 44;
 /** TabBar 高度（页面底部要留出这么多，避免最后一条内容被压住） */
 export const TAB_BAR_HEIGHT = 50;
 
+/** 语义 Tag 的三种用色（描边 Tag 用 border/fg，实心 Tag 由 `tagFilled` 派生）。 */
 export interface TagPalette {
   bg: string;
   fg: string;

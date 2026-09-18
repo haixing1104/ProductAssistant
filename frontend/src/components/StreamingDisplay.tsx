@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { connectProductStream, type SseFrame } from "../services/sse";
 
+/** 流式过程中已就绪的配图（`image.ready` 事件累积而来，可点开大图）。 */
 export interface LiveImage {
   url: string;
   alt?: string;
@@ -88,6 +89,12 @@ export function formatEvent(frame: SseFrame): string {
   }
 }
 
+/**
+ * 生成过程的实时视图（打字机正文 / 阶段 / 配图）。
+ *
+ * 挂载即连流，卸载即 abort；命中终态或 `ready` 后连接器**不会自己复活** ——
+ * 所以重新生成时必须由父组件换 `key` 重挂载（见 ProductDetailPage 的 `streamNonce`）。
+ */
 export default function StreamingDisplay({
   productId,
   reconnectDelayMs,

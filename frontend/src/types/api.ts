@@ -15,12 +15,14 @@ export interface Envelope<T> {
   message: string;
 }
 
+/** 登录/续签返回的 access 令牌（**refresh 不在响应体里**：它走 HttpOnly Cookie）。 */
 export interface TokenData {
   access_token: string;
   token_type: string;
   expires_in: number;
 }
 
+/** 当前登录身份（`GET /auth/me`；前端据此做角色化 UI）。 */
 export interface CurrentUser {
   id: string;
   org_id: string;
@@ -28,6 +30,7 @@ export interface CurrentUser {
   role: string;
 }
 
+/** 组织成员（`GET /users`；**绝不含** `hashed_password`）。 */
 export interface Member {
   id: string;
   username: string;
@@ -36,6 +39,7 @@ export interface Member {
   last_login_at?: string | null;
 }
 
+/** 商品主记录；列表与详情同形状，详情接口**额外**带 `active_job_status` / `active_job_error`。 */
 export interface Product {
   id: string;
   org_id: string;
@@ -55,6 +59,7 @@ export interface Product {
   active_job_error?: string | null;
 }
 
+/** 触发生成的返回（**不含**流地址：前端自拼 `/products/{id}/stream` + 短时票据）。 */
 export interface GenerateResult {
   thread_id: string;
   status: string;
@@ -82,10 +87,12 @@ export interface ContentBlock {
   height?: number;
 }
 
+/** 图文正文载荷（blocks 数组；与 ai-engine `content_store` 的 `blocks` 同形状）。 */
 export interface ContentData {
   blocks?: ContentBlock[];
 }
 
+/** 一版已保存的图文内容（**批准后才落库**，因此 `is_approved` 是版本级标记，不是草稿态）。 */
 export interface ContentVersion {
   id: string;
   version: number;
@@ -212,6 +219,7 @@ export interface CsvImportResult {
   skus: string[];
 }
 
+/** CSV 导入的逐行错误（来自 `400 + data.row_errors`；`line` 是原始文件行号便于定位）。 */
 export interface CsvRowError {
   line: number;
   sku_code?: string;
@@ -220,6 +228,7 @@ export interface CsvRowError {
 
 // ============================== 合规（P6/P7）=================================
 
+/** 违禁词（**全局配置，无 org_id**：改一个词影响所有组织 → 写操作仅 admin）。 */
 export interface ComplianceWord {
   id: string;
   word: string;
@@ -231,6 +240,7 @@ export interface ComplianceWord {
   is_active: boolean;
 }
 
+/** 合规正则规则（**全局配置，无 org_id**；语法在写入入口即校验，坏正则不会入库）。 */
 export interface ComplianceRule {
   id: string;
   pattern: string;
@@ -239,17 +249,20 @@ export interface ComplianceRule {
   suggestion?: string | null;
 }
 
+/** 下一次生成会下发的规则快照（与 `job:generate` 载荷里的 `rules` **完全一致**）。 */
 export interface ComplianceSnapshot {
   words: Array<{ id?: string; word: string; severity: string; source?: string | null }>;
   rules: Array<{ id?: string; pattern: string; severity: string; suggestion?: string | null }>;
 }
 
+/** 快照接口响应（计数用于「规则明明配了却没拦」的快速排查，快照给完整内容）。 */
 export interface ComplianceSnapshotResponse {
   words_count: number;
   rules_count: number;
   snapshot: ComplianceSnapshot;
 }
 
+/** 一次确定性命中（含 span：这是 backend 预览相对 ai-engine 额外返回的字段，供高亮）。 */
 export interface ComplianceHit {
   rule_id?: string | null;
   kind: "word" | "regex" | string;
@@ -261,6 +274,7 @@ export interface ComplianceHit {
   blocking: boolean;
 }
 
+/** 预览结果（`score`/`blocked` **只由确定性规则层决定**：预览不调用模型）。 */
 export interface CompliancePreviewResult {
   text_length: number;
   words_count: number;
@@ -272,6 +286,7 @@ export interface CompliancePreviewResult {
 
 // ============================== 运维只读面（P6/P7）=============================
 
+/** 消费侧心跳（`alive=false` 或**一个心跳都没有**都必须按异常看，不能显示成绿色）。 */
 export interface WorkerHeartbeat {
   consumer?: string;
   key?: string;
@@ -280,6 +295,7 @@ export interface WorkerHeartbeat {
   error?: string;
 }
 
+/** 一个消费组的状态（`pending`/`lag` 是实现积压判据；`consumers=0` 也要当异常）。 */
 export interface StreamGroupInfo {
   name?: string;
   consumers?: number;
@@ -288,6 +304,7 @@ export interface StreamGroupInfo {
   lag?: number;
 }
 
+/** 一个 Redis 流的整体状态（Redis 不可用时 `length=null` + `error`，**不抛错**）。 */
 export interface StreamOverview {
   name: string;
   key: string;
@@ -296,6 +313,7 @@ export interface StreamOverview {
   error?: string;
 }
 
+/** 某域死信队列（DLQ）的长度摘要（**只读**：清理是运维动作，接口不提供一键重投）。 */
 export interface DlqSummary {
   domain?: string;
   key?: string;
@@ -303,6 +321,7 @@ export interface DlqSummary {
   error?: string;
 }
 
+/** 运维总览（`GET /ops/overview` 的聚合结果；单项失败只降低该项，不让整页报错）。 */
 export interface OpsOverview {
   env: string;
   generated_at: string;
@@ -346,12 +365,14 @@ export interface AbortJobResult {
   already_terminal: boolean;
 }
 
+/** 一条死信消息（`payload` 为原始载荷，供人工判断根因；坏载荷给 `decode_error`）。 */
 export interface DlqEntry {
   seq: string;
   payload?: Record<string, unknown> | null;
   decode_error?: string;
 }
 
+/** 某域死信的明细列表（`length` 是全量长度，`entries` 是本页取样）。 */
 export interface DlqEntries {
   domain: string;
   key: string;

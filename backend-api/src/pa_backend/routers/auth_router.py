@@ -124,6 +124,8 @@ async def login(
             await session.rollback()
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="所属组织已停用")
         await clear_failures(redis_client, settings, username=body.username, ip=ip)
+        # 刷新「服务端会话」必须在 commit 之前完成：session_store 写的是 Redis，
+        # 只有它能失败；若先 commit 再把 Cookie 发出去，刷新时 Redis 里查不到，用户会被立刻踢下线
         refresh_token = await session_store.issue(
             redis_client, settings, user_id=str(user.id), org_id=str(user.org_id), role=user.role
         )
@@ -131,6 +133,7 @@ async def login(
     finally:
         await redis_client.aclose()
     await session.commit()
+    # Cookie 只能在事务提交成功后写（顺序不可换）：commit 失败时不应下发凭据
     _set_refresh_cookie(response, settings, refresh_token)
     return ok(payload)
 
@@ -139,6 +142,7 @@ async def login(
 async def refresh(request: Request, response: Response) -> dict:
     """续签：Cookie 里的 refresh → 新 access + 新 refresh（轮换 + 重用检测）。"""
     settings: Settings = request.app.state.settings
+    # 头名/头值都做小写比较：HTTP 头名大小写不敏感，且前端可能写 "Fetch"/"fetch"
     if (request.headers.get(CSRF_HEADER) or "").lower() != CSRF_VALUE:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少安全请求头（CSRF 防护）")
     token = request.cookies.get(settings.refresh_cookie_name)
@@ -146,6 +150,7 @@ async def refresh(request: Request, response: Response) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少 refresh cookie")
     redis_client = new_async_redis(settings)
     try:
+        # resolve_and_rotate = 校验 + 作废旧 token（一次性）：旧 token 被再次使用即为重用攻击 → 吊销
         rotate = await session_store.resolve_and_rotate(redis_client, settings, token)
         if rotate is None:
             raise HTTPException(

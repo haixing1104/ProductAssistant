@@ -6,6 +6,7 @@
 // 注意: 只存"组织名"这一个非敏感字段（**绝不存密码/token** —— access 仍在内存、refresh 仍在实现层的 cookie 存储）。
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+/** AsyncStorage 的键名（与 H5/localStorage 同名：排查时一眼能对上）。 */
 const ORG_KEY = "pa_mobile_org";
 
 /** 读取记住的组织名（读不到/异常都返回空串，调用方退化为"没记住"）。 */

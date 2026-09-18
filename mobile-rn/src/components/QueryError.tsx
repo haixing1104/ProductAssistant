@@ -13,6 +13,7 @@ interface Props {
   what: string;
 }
 
+/** 查询失败态：把「请求失败」与「没有数据」区分开，并给出可执行的重试动作。 */
 export default function QueryError({ error, onRetry, what }: Props) {
   return (
     <EmptyState

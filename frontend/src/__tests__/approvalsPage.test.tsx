@@ -26,8 +26,10 @@ vi.mock("react-router-dom", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 
+/** 本文件只桩 `approvalsApi`：其它域不应被这条用例触达（触达即说明页面越权取数）。 */
 const mockApi = vi.mocked(approvalsApi);
 
+/** 造一张最小可信的审批单（默认 pending + 高价值转人工，覆盖最常见的展示分支）。 */
 function approval(overrides: Partial<Approval> = {}): Approval {
   return {
     id: "a-1",
@@ -44,6 +46,7 @@ function approval(overrides: Partial<Approval> = {}): Approval {
   };
 }
 
+/** 挂载审批中心（每个用例独立 QueryClient：`retry:false` 让失败立刻暴露，不等重试）。 */
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

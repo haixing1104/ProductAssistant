@@ -35,6 +35,7 @@ let returnUrl: string | null = null;
 // ---------- 会话过期事件（Web 是 window 事件；RN 用内部 emitter）----------
 const authExpiredHandlers = new Set<() => void>();
 
+/** 兜底关联 ID（expo-crypto 不可用时；与 Web 端口同格式，便于日志统一检索）。 */
 function fallbackRequestId(): string {
   return `req-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }

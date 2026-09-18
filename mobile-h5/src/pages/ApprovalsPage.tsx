@@ -25,8 +25,10 @@ import { ApprovalStatusTag, ScoreTag } from "../components/StatusTag";
 import { formatTime, toTagColor } from "@pa/core/services/mobileFormat";
 
 type Tab = "pending" | "approved" | "rejected";
+/** 触底加载每页条数（与桌面端 pageSize 同口径）。 */
 const PAGE_SIZE = 10;
 
+/** 审批中心（移动版）：三个 tab 的卡片列表；**列表不放「批准」按钮**，动作全在详情页。 */
 export default function ApprovalsPage() {
   const navigate = useNavigate();
   const role = useAuthStore((s) => s.user?.role);

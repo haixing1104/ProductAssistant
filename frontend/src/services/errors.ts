@@ -19,6 +19,7 @@ interface EnvelopeBody {
   detail?: string;
 }
 
+/** CSV 导入的逐行错误（来自 `400 + data.row_errors`；导出给页面渲染错误表格）。 */
 export interface CsvRowError {
   line: number;
   sku_code?: string;

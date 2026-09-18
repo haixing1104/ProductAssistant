@@ -15,6 +15,7 @@ interface Props {
   style?: object;
 }
 
+/** Tag（颜色必须走 `tagPalette`/`tagFilled`；`solid` 用于必须一眼看到的场合）。 */
 export default function Tag({ children, color, fill = "outline", style }: Props) {
   const palette = fill === "solid" ? tagFilled(color) : tagPalette(color);
   return (

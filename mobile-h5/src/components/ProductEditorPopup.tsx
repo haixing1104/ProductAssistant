@@ -25,6 +25,7 @@ interface Values {
   stock_status: string;
 }
 
+/** 商品新建/编辑弹层（`target` 为受控开关：null=关闭，「new」=新建，Product=编辑）。 */
 export default function ProductEditorPopup({ target, onClose, onSaved }: Props) {
   const qc = useQueryClient();
   const [form] = Form.useForm<Values>();

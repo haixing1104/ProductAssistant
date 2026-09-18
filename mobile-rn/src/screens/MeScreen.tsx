@@ -17,12 +17,14 @@ import { ROLE_LABEL, canApprove, isAdmin, useAuthStore } from "@pa/core/store/au
 import { resolveDesktopBaseUrl } from "../platform/env";
 import { forgetOrg } from "../services/rememberOrg";
 
+/** 只在电脑端实现的模块（低频 + 表格密集）：RN 里只给浏览器入口，不做残缺版。 */
 const DESKTOP_ONLY = [
   { path: "/compliance", label: "合规词库", roles: ["admin", "reviewer"] },
   { path: "/ops", label: "运维面板", roles: ["admin"] },
   { path: "/members", label: "用户管理", roles: ["admin"] },
 ];
 
+/** 「我的」页：身份/审批权限 + 退出登录 + 清除记住的组织名 + 电脑端模块的浏览器入口。 */
 export default function MeScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const user = useAuthStore((state) => state.user);
   const clear = useAuthStore((state) => state.clear);

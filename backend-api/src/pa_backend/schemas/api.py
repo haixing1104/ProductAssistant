@@ -227,6 +227,7 @@ def serialize_product(product) -> dict:
         "org_id": str(product.org_id),
         "sku_code": product.sku_code,
         "title": product.title,
+        # Decimal → float：前端按 number 使用（直接序列化 Decimal 会变成字符串，前端加法/比较会静默出错）
         "base_price": float(product.base_price) if product.base_price is not None else 0.0,
         "stock_status": product.stock_status,
         "status": product.status,
@@ -338,6 +339,7 @@ def serialize_approval(approval, product=None, *, include_snapshot: bool = True)
 
 
 SEVERITY_VALUES = ("high", "medium", "low")
+#: 与 ai-engine 的 severity 枚举**同值**（改一处必须同步另一处）；low 合法但只扣分不阻断
 
 
 class ComplianceWordCreateRequest(BaseModel):
@@ -493,6 +495,8 @@ def serialize_word(record) -> dict:
         "source": record.source,
         "effective_at": record.effective_at.isoformat() if record.effective_at else None,
         "expires_at": record.expires_at.isoformat() if record.expires_at else None,
+        # 生效判据的边界口径（与 ai-engine 快照过滤一致）：生效时间为「到点即生效」（<=），
+        # 过期时间为「到点即失效」（>）—— 两侧都取等号会把边界那一秒算错
         "is_active": bool(
             (record.effective_at is None or record.effective_at <= moment)
             and (record.expires_at is None or record.expires_at > moment)

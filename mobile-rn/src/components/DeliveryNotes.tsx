@@ -24,6 +24,7 @@ interface Props {
   compact?: boolean;
 }
 
+/** 投递状态：手机没有 hover，失败原因改为点按展开（`dlq` 是终态，文案要点明需人工介入）。 */
 export default function DeliveryNotes({ notes, compact = false }: Props) {
   const [open, setOpen] = useState(false);
 

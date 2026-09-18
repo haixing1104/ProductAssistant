@@ -16,8 +16,10 @@ vi.mock("../api", () => ({
   opsApi: { overview: vi.fn(), dlq: vi.fn(), abortJob: vi.fn() },
 }));
 
+/** 只桩运维面：本文件守护的是「终止卡住任务」的交互与请求体，不关心其它域。 */
 const mockOps = vi.mocked(opsApi);
 
+/** 运维总览样本：1 个健康心跳 + 1 个已卡 30 分钟的任务（列表与终止入口的最小前提）。 */
 const OVERVIEW = {
   env: "test",
   generated_at: "2026-09-17T12:00:00+00:00",
@@ -38,6 +40,7 @@ const OVERVIEW = {
   ],
 };
 
+/** 挂载运维面板（独立 QueryClient + 关闭重试：请求体断言依赖「只发一次」）。 */
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

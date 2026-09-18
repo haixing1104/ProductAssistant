@@ -5,6 +5,7 @@
 //   · RN 不能像浏览器那样 `location.assign`，会话过期后要"回到原页面"只能靠 route 名 + 参数重建。
 import type { NavigationState } from "@react-navigation/native";
 
+/** 导航目标（与 `../navigation/paths` 的解析结果同形状）。 */
 export interface RouteTarget {
   name: string;
   params?: Record<string, unknown>;

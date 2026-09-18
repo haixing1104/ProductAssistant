@@ -42,6 +42,7 @@ import QueryError from "../components/QueryError";
 import { ApprovalStatusTag, ScoreTag } from "../components/StatusTag";
 import { formatTime, toTagColor } from "@pa/core/services/mobileFormat";
 
+/** 审批详情（通知深链落地页）：先校验票据定位单据，再展示复盘并给出「批准/驳回」。 */
 export default function ApprovalDetailPage() {
   const { approvalId = "" } = useParams();
   const [params] = useSearchParams();

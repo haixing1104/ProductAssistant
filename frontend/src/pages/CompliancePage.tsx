@@ -34,6 +34,7 @@ import { SEVERITY_LABELS, severityColor, severityLabel } from "../services/produ
 import { isAdmin, useAuthStore } from "../store/authStore";
 import type { ComplianceHit, CompliancePreviewResult, ComplianceRule, ComplianceWord } from "../types/api";
 
+/** 严重级下拉项（与 backend `SEVERITY_VALUES` 对齐；标签来自 productMeta 单点）。 */
 const SEVERITY_OPTIONS = [
   { value: "high", label: SEVERITY_LABELS.high },
   { value: "medium", label: SEVERITY_LABELS.medium },
@@ -62,6 +63,12 @@ export function hitSpans(hits: ComplianceHit[]): Array<[number, number]> {
     .sort((a, b) => a[0] - b[0]);
 }
 
+/**
+ * 合规词库与规则页（4 个 tab：违禁词 / 正则规则 / 命中预览 / 当前快照）。
+ *
+ * 写操作按 `admin` 收口（服务端还有一道 403）；预览必须用「当前生效快照」，
+ * 才能保证「预览说会拦 → 真实生成就一定会拦」这一口径不漂移。
+ */
 export default function CompliancePage() {
   const qc = useQueryClient();
   const admin = isAdmin(useAuthStore((s) => s.user?.role));

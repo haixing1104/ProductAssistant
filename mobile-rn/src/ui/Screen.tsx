@@ -23,6 +23,7 @@ interface Props {
   testID?: string;
 }
 
+/** 页面容器：负责安全区与底部留白（`scroll` 让详情页一次性获得可滚动区；列表页传 false）。 */
 export default function Screen({ children, scroll = true, withActionBar = false, style, testID }: Props) {
   const insets = useSafeAreaInsets();
   const paddingBottom = (withActionBar ? ACTION_BAR_HEIGHT + TAB_BAR_HEIGHT : TAB_BAR_HEIGHT) + insets.bottom;

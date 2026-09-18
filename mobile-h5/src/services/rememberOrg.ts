@@ -14,6 +14,7 @@ function safeStorage(): Storage | null {
   }
 }
 
+/** 读取记住的组织名（storage 不可用时返回空串 = 没记住，不抛错）。 */
 export function readRememberedOrg(storage: Storage | null = safeStorage()): string {
   try {
     return storage?.getItem(ORG_KEY) ?? "";
@@ -22,6 +23,7 @@ export function readRememberedOrg(storage: Storage | null = safeStorage()): stri
   }
 }
 
+/** 记住组织名（只在登录成功后调用；空白值忽略，写入失败不影响登录流程）。 */
 export function rememberOrg(org: string, storage: Storage | null = safeStorage()): void {
   const value = org.trim();
   if (!value) return;
@@ -32,6 +34,7 @@ export function rememberOrg(org: string, storage: Storage | null = safeStorage()
   }
 }
 
+/** 清除记住的组织名（「我的」页的手动清理入口）。 */
 export function forgetOrg(storage: Storage | null = safeStorage()): void {
   try {
     storage?.removeItem(ORG_KEY);

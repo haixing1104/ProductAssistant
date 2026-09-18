@@ -9,6 +9,7 @@ import { approvalStatusLabel, productStatusColor, productStatusLabel } from "@pa
 
 import { toTagColor } from "@pa/core/services/mobileFormat";
 
+/** 商品状态 Tag（描边）：颜色经 `toTagColor` 翻译，保证与桌面端同源同义。 */
 export function ProductStatusTag({ status }: { status?: string | null }) {
   if (!status) return null;
   return (

@@ -28,8 +28,10 @@ import { useAuthStore } from "@pa/core/store/authStore";
 import type { Approval } from "@pa/core/types/api";
 
 type Tab = "pending" | "approved" | "rejected";
+/** 触底加载每页条数（与 H5/桌面端同口径）。 */
 const PAGE_SIZE = 10;
 
+/** 审批中心（RN 版）：三个 tab 的卡片列表；**列表不放「批准」按钮**，动作全在详情页。 */
 export default function ApprovalsScreen({ onOpenDetail }: { onOpenDetail: (approvalId: string) => void }) {
   const role = useAuthStore((state) => state.user?.role);
   const [tab, setTab] = useState<Tab>("pending");

@@ -29,6 +29,7 @@ interface Props {
   onSignedIn: (returnTo: string | null) => void;
 }
 
+/** 登录/注册同屏（RN 版）：成功后记住组织名；跳转目标由宿主决定（RN 不能自己 location.assign）。 */
 export default function LoginScreen({ expired = false, onSignedIn }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [orgName, setOrgName] = useState("");

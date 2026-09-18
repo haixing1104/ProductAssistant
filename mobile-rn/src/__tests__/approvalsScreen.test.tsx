@@ -20,8 +20,10 @@ jest.mock("@pa/core/api", () => ({
 
 jest.mock("../platform/pickFile", () => ({ pickCsvFile: jest.fn(), pickImageFile: jest.fn() }));
 
+/** 只桩审批域的列表接口（本文件守护的是卡片列表口径）。 */
 const mockApi = approvalsApi as unknown as { list: jest.Mock };
 
+/** 造一张最小可信的审批单（默认 pending + 高价值转人工）。 */
 function approval(overrides: Partial<Approval> = {}): Approval {
   return {
     id: "a-1",
@@ -39,7 +41,9 @@ function approval(overrides: Partial<Approval> = {}): Approval {
   };
 }
 
+/** SafeAreaProvider 的初始度量（jsdom 无原生安全区）。 */
 const insets = { top: 0, left: 0, right: 0, bottom: 0 };
+/** iPhone 14 逻辑分辨率。 */
 const frame = { x: 0, y: 0, width: 390, height: 844 };
 
 /**

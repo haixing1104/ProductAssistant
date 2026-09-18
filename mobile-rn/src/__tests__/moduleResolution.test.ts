@@ -21,7 +21,9 @@ const metroConfig = require("../../metro.config.js");
 const jestConfig = require("../../jest.config.js");
 
 const projectRoot = path.resolve(__dirname, "../..");
+/** 共享契约层目录（`@pa/core/*` 指向的真实位置；Metro 必须放行它才能解析）。 */
 const CORE_DIR = path.resolve(projectRoot, "../frontend/src");
+/** 必须**只有一份**的包：出现第二份的最典型症状是 hooks 直接崩（两份 React），Metro 与 Jest 两条路径都要锁。 */
 const SINGLETONS = ["react", "react-native", "axios", "zustand", "@tanstack/react-query"];
 
 describe("Metro 共享层解析（防两份 React）", () => {

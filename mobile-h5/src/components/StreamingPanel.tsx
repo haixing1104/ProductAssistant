@@ -12,6 +12,7 @@ import { connectProductStream, type SseFrame } from "@pa/core/services/sse";
 
 import { formatEvent } from "@pa/core/services/streamLabels";
 
+/** 流式过程中已就绪的配图（可点开放大看细节）。 */
 export interface LiveImage {
   url: string;
   alt?: string;
@@ -31,6 +32,12 @@ interface Props {
   height?: number;
 }
 
+/**
+ * 实时生成面板（移动版）：打字机正文 + 阶段 + 配图。
+ *
+ * 挂载即连流、卸载即 abort；命中终态/`ready` 后连接器不会自动复活，
+ * 重新生成必须由父级换 `key` 重挂载（同桌面端口径）。
+ */
 export default function StreamingPanel({
   productId,
   reconnectDelayMs,

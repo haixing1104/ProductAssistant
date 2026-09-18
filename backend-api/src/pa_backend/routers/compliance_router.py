@@ -70,6 +70,7 @@ async def list_words(
     items, total = await _repo(session).list_words(
         severity=severity, active_only=active_only, keyword=keyword, offset=offset, limit=limit
     )
+    # 总数放响应头而不是包一层 {items,total}：与其它列表接口同一契约（前端 unwrapPage 读它）
     response.headers["X-Total-Count"] = str(total)
     return ok([serialize_word(item) for item in items])
 
@@ -107,6 +108,8 @@ async def update_word(
     record = await repo.get_word(to_uuid(word_id))
     if record is None:
         raise ApiError(404, "词条不存在")
+    # exclude_unset 才能区分「没传这个字段」与「显式传了 null」——
+    # 直接 model_dump() 会把未传字段也带上默认值，等于每次 PATCH 都把其它字段重置一遍
     fields = body.model_dump(exclude_unset=True)
     new_word = fields.get("word")
     if new_word and new_word != record.word:
@@ -117,6 +120,7 @@ async def update_word(
         if field in fields:
             setattr(record, field, fields[field])
     if record.effective_at and record.expires_at and record.expires_at <= record.effective_at:
+        # 先回滚再抛：上面的 setattr 只改了内存对象，不回滚会让本请求内后续读取看到非法值
         await session.rollback()
         raise ApiError(400, "expires_at 必须晚于 effective_at")
     await session.commit()
@@ -154,6 +158,7 @@ async def list_rules(
 ) -> dict:
     """正则规则列表（分页）。"""
     items, total = await _repo(session).list_rules(severity=severity, offset=offset, limit=limit)
+    # 同词条列表：总数走响应头（前端 unwrapPage 的统一契约）
     response.headers["X-Total-Count"] = str(total)
     return ok([serialize_rule(item) for item in items])
 
@@ -254,6 +259,8 @@ async def preview(
     matcher = compile_matcher(await _repo(session).snapshot())
     hits = matcher.check(body.text)
     words_count, rules_count = matcher.rule_count
+    # score/blocked 只由**确定性规则层**决定（预览不调用模型，也不做语义兜底评估）：
+    # 与 ai-engine 的 rule_score 同值，避免「预览说不拦、真实生成却转人工」的口径漂移
     return ok(
         {
             "text_length": len(body.text),

@@ -14,6 +14,7 @@ interface Props {
   onRelogin: () => void;
 }
 
+/** 会话过期弹窗（RN 版）：从平台端口订阅过期事件，「重新登录」由宿主负责跳转。 */
 export default function SessionGate({ onRelogin }: Props) {
   useEffect(() => {
     return getPlatform().onAuthExpired(() => {

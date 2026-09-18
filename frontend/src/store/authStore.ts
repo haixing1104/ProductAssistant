@@ -2,6 +2,7 @@
 // 页面刷新后由 http.restoreSession() 用 HttpOnly refresh cookie 静默续签恢复。
 import { create } from "zustand";
 
+/** 当前登录身份（字段与 backend `/auth/me` 一一对应；`undefined` 表示尚未拉到）。 */
 export interface AuthUser {
   id?: string;
   org_id?: string;
@@ -17,6 +18,13 @@ interface AuthState {
   clear: () => void;
 }
 
+/**
+ * 全局登录态（Zustand，单例）。
+ *
+ * 契约（勿改）:
+ *   · `setSession(token, user?)`：续签只换 access 时**不传** `user`，避免把已有身份信息清掉；
+ *   · `clear()`：登出/会话失效时同时清 token 与 user，UI 随之回登录页（由守卫跳转）。
+ */
 export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   user: null,

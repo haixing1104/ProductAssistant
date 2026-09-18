@@ -61,6 +61,7 @@ export function stuckAgeLabel(ageSeconds?: number | null): string {
   return `${(ageSeconds / 3600).toFixed(1)}h`;
 }
 
+/** 运维面板（只读）：心跳 / 流与消费组 / DLQ 明细 / 卡住任务（可带原因终止）。 */
 export default function OpsPage() {
   const qc = useQueryClient();
   const [domain, setDomain] = useState<string | null>(null);

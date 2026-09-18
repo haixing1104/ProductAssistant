@@ -12,6 +12,7 @@ interface Props {
   emptyText?: string;
 }
 
+/** 图文渲染（移动版）：图片点开可放大（`ImageViewer`），正文用 `.pa-pre-wrap` 保留换行。 */
 export default function BlockView({ blocks, emptyText = "（无内容）" }: Props) {
   const [preview, setPreview] = useState<string | null>(null);
   const list = blocks ?? [];
