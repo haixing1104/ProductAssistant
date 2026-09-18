@@ -13,6 +13,8 @@ import { ROLE_LABEL, canApprove, isAdmin, useAuthStore } from "@pa/core/store/au
 import { desktopBaseUrl } from "@pa/core/services/mobileFormat";
 import { forgetOrg } from "../services/rememberOrg";
 
+import OrgScopeSection from "../components/OrgScopeSection";
+
 /** 只在电脑端实现的模块（低频 + 表格密集）：这里只给浏览器入口，不做残缺的移动版。 */
 const DESKTOP_ONLY = [
   { path: "/compliance", label: "合规词库", roles: ["admin", "reviewer"] },
@@ -20,7 +22,7 @@ const DESKTOP_ONLY = [
   { path: "/members", label: "用户管理", roles: ["admin"] },
 ];
 
-/** 「我的」页：身份/角色/审批权限 + 退出登录 + 清除记住的组织名 + 电脑端模块入口。 */
+/** 「我的」页：身份/角色/审批权限 + **组织切换（超管）** + 退出登录 + 清除记住的组织名 + 电脑端模块入口。 */
 export default function MePage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
@@ -56,6 +58,8 @@ export default function MePage() {
           审批权限
         </List.Item>
       </List>
+      {/* 平台超管的组织切换（非超管不渲染）：放在「账号」之后、「电脑端模块」之前 */}
+      <OrgScopeSection />
       {isAdmin(user?.role) || canApprove(user?.role) ? (
         <List header="仅电脑端提供（点按在桌面端打开）">
           {DESKTOP_ONLY.filter((item) => item.roles.includes(user?.role ?? "")).map((item) => (

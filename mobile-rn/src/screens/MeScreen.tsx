@@ -14,6 +14,7 @@ import { Dialog, Toast } from "../ui/feedback";
 import { authApi } from "@pa/core/api";
 import { ROLE_LABEL, canApprove, isAdmin, useAuthStore } from "@pa/core/store/authStore";
 
+import OrgScopeSection from "../components/OrgScopeSection";
 import { resolveDesktopBaseUrl } from "../platform/env";
 import { forgetOrg } from "../services/rememberOrg";
 
@@ -24,7 +25,7 @@ const DESKTOP_ONLY = [
   { path: "/members", label: "用户管理", roles: ["admin"] },
 ];
 
-/** 「我的」页：身份/审批权限 + 退出登录 + 清除记住的组织名 + 电脑端模块的浏览器入口。 */
+/** 「我的」页：身份/审批权限 + **组织切换（超管）** + 退出登录 + 清除记住的组织名 + 电脑端模块的浏览器入口。 */
 export default function MeScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const user = useAuthStore((state) => state.user);
   const clear = useAuthStore((state) => state.clear);
@@ -66,6 +67,9 @@ export default function MeScreen({ onSignedOut }: { onSignedOut: () => void }) {
           extra={canApprove(user?.role) ? <Tag color="success">可审批</Tag> : <Tag>只读</Tag>}
         />
       </ListSection>
+
+      {/* 平台超管的组织切换（非超管不渲染）：放在「账号」之后、「电脑端模块」之前 */}
+      <OrgScopeSection />
 
       {canSeeDesktop ? (
         <ListSection header="仅电脑端提供（点按用浏览器打开）">

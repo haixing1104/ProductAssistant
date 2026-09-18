@@ -1,4 +1,4 @@
-// 登录页（移动版）。
+// 登录页（移动版）。注册入口由 `SELF_REGISTRATION_ENABLED` 控制（当前关闭）。
 //
 // 与桌面端 LoginPage 的两点差异（都是手机场景逼出来的，不是风格偏好）:
 //   1) **记住组织名**：PA 的用户名只在组织内唯一，跨组织同名要靠 `org_name` 消歧；
@@ -10,9 +10,10 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { authApi } from "@pa/core/api";
 import { apiErrorMessage } from "@pa/core/services/errors";
+import { SELF_REGISTRATION_ENABLED } from "@pa/core/services/features";
 import { resetExpiredFlag, scheduleTokenRefresh } from "@pa/core/services/http";
 import { getPlatform } from "@pa/core/services/platform";
-import { useAuthStore } from "@pa/core/store/authStore";
+import { authUserFromMe, useAuthStore } from "@pa/core/store/authStore";
 
 import { readRememberedOrg, rememberOrg } from "../services/rememberOrg";
 
@@ -47,7 +48,7 @@ export default function LoginPage() {
       // 若在 /auth/me 之后才 setSession，请求会带空 token → 401（登录成功却报登录失败）
       setSession(login.access_token);
       const me = await authApi.me();
-      setSession(login.access_token, { id: me.id, org_id: me.org_id, username: me.username, role: me.role });
+      setSession(login.access_token, authUserFromMe(me));
       scheduleTokenRefresh(); // 到期前主动续签（HttpOnly refresh cookie）
       resetExpiredFlag(); // 新会话开始后允许再次触发过期提示
       if (values.orgName) rememberOrg(values.orgName);
@@ -107,14 +108,16 @@ export default function LoginPage() {
             <Input placeholder="至少 8 位" type="password" autoComplete="current-password" />
           </Form.Item>
         </Form>
-        <Button
-          block
-          fill="none"
-          color="primary"
-          onClick={() => setMode(mode === "login" ? "register" : "login")}
-        >
-          {mode === "login" ? "没有账号？注册新企业" : "已有账号？去登录"}
-        </Button>
+        {SELF_REGISTRATION_ENABLED ? (
+          <Button
+            block
+            fill="none"
+            color="primary"
+            onClick={() => setMode(mode === "login" ? "register" : "login")}
+          >
+            {mode === "login" ? "没有账号？注册新企业" : "已有账号？去登录"}
+          </Button>
+        ) : null}
       </div>
     </div>
   );

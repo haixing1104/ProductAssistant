@@ -39,9 +39,19 @@ interface Props {
 export default function TabShell({ onOpenProduct, onOpenApproval, onSignedOut }: Props) {
   const Tab = createBottomTabNavigator<TabParamList>();
   const role = useAuthStore((state) => state.user?.role);
+  const selectedOrgId = useAuthStore((state) => state.selectedOrgId);
 
   return (
     <Tab.Navigator
+      /*
+        key = 当前租户（**不能删**）: `createBottomTabNavigator` 默认保活已访问过的 Tab 屏，
+        超管在「我的」切换组织后回到商品 Tab **不会**自动重取数据（会看到上一个租户的列表）。
+        用 key 强制整体重挂载后，各屏「挂载即取数」必然拿到新租户数据；
+        代价是回到第一个 Tab（商品）并清空旧租户的筛选/分页 —— 换租户本就该从干净状态开始。
+        （H5 用平级路由会卸载重挂载，所以 H5 不需要这个 key；选择器在「我的」页内，
+         见 components/OrgScopeSection.tsx。）
+      */
+      key={selectedOrgId ?? "own"}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,

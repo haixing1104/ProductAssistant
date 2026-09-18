@@ -9,7 +9,7 @@ import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { authApi } from "@pa/core/api";
-import { canApprove, useAuthStore } from "@pa/core/store/authStore";
+import { authUserFromMe, canApprove, useAuthStore } from "@pa/core/store/authStore";
 
 /** 底部 Tab 外壳（列表类页面的公共布局）；刷新后缺身份时从 `/auth/me` 补权威角色。 */
 export default function TabShell() {
@@ -25,7 +25,7 @@ export default function TabShell() {
     if (token && !user?.username) {
       authApi
         .me()
-        .then((me) => setUser({ id: me.id, org_id: me.org_id, username: me.username, role: me.role }))
+        .then((me) => setUser(authUserFromMe(me)))
         .catch(() => {});
     }
   }, [token, user, setUser]);
@@ -38,6 +38,9 @@ export default function TabShell() {
 
   return (
     <div className="pa-page" style={{ paddingBottom: "calc(50px + var(--pa-safe-bottom))" }}>
+      {/* 组织选择器不在这里：它属于账号级设置，已移到「我的」页（见 OrgScopeSection）。
+          H5 用平级路由 → 切 Tab 会卸载/重挂载页面，各页「挂载即取数」天然拿到新租户数据，
+          所以这里不需要（也不该）用 key 强制重挂载。 */}
       <Outlet />
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", zIndex: 100 }}>
         <TabBar activeKey={activeKey} onChange={(key) => navigate(key)}>
