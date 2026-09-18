@@ -183,7 +183,11 @@ describe("审批动作必填校验（与后端同口径）", () => {
     mockApi.get.mockResolvedValue(approval({ status: "approved", resolved_at: "2026-09-17T10:00:00" }));
     renderPage();
 
-    await waitFor(() => expect(screen.getByText(/无需再处理/)).toBeInTheDocument());
+    // 文案**逐字**断言（不用 /无需再处理/ 这种宽正则）：句子与标签都会提供「已」，
+    // 一旦有人再写成「该审批单已{label}」，就会渲染出「已已批准」——正则拦不住这种回潮。
+    await waitFor(() =>
+      expect(screen.getByText("该审批单已批准，无需再处理")).toBeInTheDocument(),
+    );
     expect(screen.queryByRole("button", { name: "批准" })).toBeNull();
     expect(screen.queryByRole("button", { name: "驳回" })).toBeNull();
   });

@@ -275,7 +275,8 @@ export default function ApprovalDetailScreen({ approvalId, ticket, onBack }: Pro
           </>
         ) : (
           <Text style={styles.settledNote}>
-            该审批单已{approvalStatusLabel(view.status)}，无需再处理
+            {/* 标签本身已带「已」（已批准/已驳回），句子里不要再写「已」——否则渲染成「已已批准」 */}
+            该审批单{approvalStatusLabel(view.status)}，无需再处理
           </Text>
         )}
       </View>

@@ -298,7 +298,8 @@ export default function ApprovalDetailPage() {
             </>
           ) : (
             <div style={{ flex: 1, fontSize: 13, color: "#999" }}>
-              该审批单已{approvalStatusLabel(view.status)}，无需再处理
+              {/* 标签本身已带「已」（已批准/已驳回），句子里不要再写「已」——否则渲染成「已已批准」 */}
+              该审批单{approvalStatusLabel(view.status)}，无需再处理
             </div>
           )}
           {/* 补投：仅 admin，且只在该单"真卡住"（商品仍停在待审批）时露出 */}
