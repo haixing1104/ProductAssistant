@@ -12,6 +12,8 @@
 # 停止    : 前台模式直接 Ctrl-C（脚本会收干净三个进程及其子进程）；
 #           后台模式（--detach）用 ./scripts/dev-down.sh；跟进日志用 ./scripts/dev-logs.sh。
 #           本脚本启动前也会检测「是否已在运行」，避免重复起（两个 worker 会抢同一消费组 PEL）。
+# 宣传页  : 作品集宣传页（portfolio/，:5175）**不在本脚本内** —— 它零后端依赖、常年独立部署，
+#           混进这条进程组只会让 dev-down/dev-logs 多一份要收的边界；要用时单独起：./scripts/dev-landing.sh
 #
 # 用法    : ./scripts/dev-up.sh [选项]
 #             （无参数）      全起：基础设施 + backend + ai-engine + frontend + mobile（前台）
@@ -79,6 +81,7 @@ usage() {
 日志: ${TMPDIR:-/tmp}/padev/{backend,ai-engine,frontend,mobile}.log（可用 PAD_LOG_DIR 覆盖）
       每次启动会把上一轮日志滚成 .log.1（保留 PAD_LOG_KEEP 份，默认 3）—— 不再清空历史现场
 移动端: http://localhost:5174（真机联调：http://<本机局域网IP>:5174 —— 走 vite 代理，无需 CORS）
+宣传页: 不由本脚本启动（零后端依赖）：./scripts/dev-landing.sh → http://localhost:5175
 停止: 前台 Ctrl-C；后台 ./scripts/dev-down.sh
 
 EOF
@@ -486,6 +489,7 @@ echo "  前端工作台 : http://localhost:5173      （首次需点「注册新
 if [ "${WITH_MOBILE}" = "1" ]; then
 echo "  移动端 H5  : http://localhost:5174      （真机：http://<本机局域网IP>:5174，走 vite 代理无需 CORS）"
 fi
+echo "  作品集宣传页 : http://localhost:5175      （不在本脚本内：另开终端 ./scripts/dev-landing.sh）"
 echo "  后端 API   : http://localhost:${BACKEND_PORT:-8000}/healthz  ·  /readyz  ·  /docs"
 if [ "${WITH_AI}" = "1" ]; then
 echo "  AI 引擎    : worker 心跳见 /ops 页面（运维面板，仅 admin）"

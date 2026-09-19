@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 站点图标：品牌色圆角方块 + 「作品集」的抽象页签符号（纯几何，零依赖） -->
+  <rect width="64" height="64" rx="14" fill="#4f46e5" />
+  <path d="M20 40V24h9a6 6 0 0 1 0 12h-9" stroke="#fff" stroke-width="4.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="42" cy="38" r="4.5" fill="#fff" />
+</svg>

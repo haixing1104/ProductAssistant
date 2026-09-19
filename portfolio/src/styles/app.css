@@ -1,0 +1,84 @@
+/* =============================================================================
+ * portfolio 作品集 | 样式入口（Tailwind CSS v4）
+ *
+ * 与仓库其他前端的差异（一句话）: 本模块**唯一**使用原子化 CSS，且 Tailwind 只装在本模块
+ * （`tailwindcss` + `@tailwindcss/vite` 只进本模块 package.json、插件只在本文的 vite.config 注册），
+ * frontend/（antd）、mobile-h5/（antd-mobile）、mobile-rn/（自研薄 UI）的构建链路零改动。
+ *
+ * 两个**照抄 v3 教程会错**的点:
+ *   1. 配置在 CSS 里（`@theme`）—— 没有 tailwind.config.js，也没有 postcss.config；
+ *   2. 深色模式默认走 `prefers-color-scheme`（零 JS）—— 要手动切换才需要 `@custom-variant dark`。
+ *
+ * 纪律: 颜色 / 圆角 / 字体只从 `@theme` 取（组件里不写十六进制、不写魔法像素）；
+ *       重复三次以上的样式才抽成语义类，其余一律原子类（读 JSX 就知道长什么样）。
+ *
+ * 已知副作用（刻意接受）: `@import "tailwindcss"` 自带 Preflight（基础样式重置），
+ * 会重置 h1/h2/p/ul 等默认样式。本站是独立页面，无历史样式要兼容，因此保留 Preflight。
+ * ========================================================================== */
+
+@import "tailwindcss";
+
+@theme {
+  /* 品牌色（oklch：高饱和区间比 sRGB 更均匀，v4 内置色板也是 oklch） */
+  --color-brand-50: oklch(0.97 0.02 265);
+  --color-brand-100: oklch(0.93 0.04 265);
+  --color-brand-500: oklch(0.62 0.15 265);
+  --color-brand-600: oklch(0.55 0.16 265);
+  --color-brand-700: oklch(0.48 0.16 265);
+
+  /* 中性色（偏冷的灰，避免和品牌蓝打架） */
+  --color-ink-50: oklch(0.98 0.004 265);
+  --color-ink-100: oklch(0.95 0.006 265);
+  --color-ink-200: oklch(0.9 0.008 265);
+  --color-ink-500: oklch(0.55 0.02 265);
+  --color-ink-700: oklch(0.38 0.02 265);
+  --color-ink-900: oklch(0.22 0.02 265);
+
+  /* 字体：中文优先 PingFang/微软雅黑，西文优先 Inter —— 演示截图里两类字形混排不突兀 */
+  --font-sans:
+    "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+
+  --radius-card: 1rem;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    /* 手机上横屏/缩放时不让 iOS 擅自放大正文字号 */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-white text-ink-900 antialiased dark:bg-ink-900 dark:text-ink-50;
+  }
+}
+
+@layer components {
+  /* 卡片：作品卡与内容块共用 */
+  .card {
+    @apply rounded-card border border-ink-100 bg-white p-6 shadow-sm sm:p-8 dark:border-white/10 dark:bg-white/[0.04];
+  }
+
+  /* 三个按钮态：主操作 / 次要操作 / 禁用（演示环境未接入时显示的占位态） */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition outline-none hover:bg-brand-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-ink-200 px-5 py-2.5 text-sm font-medium text-ink-700 transition outline-none hover:bg-ink-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 dark:border-white/15 dark:text-ink-50 dark:hover:bg-white/5;
+  }
+
+  .btn-disabled {
+    @apply inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-full border border-dashed border-ink-200 px-5 py-2.5 text-sm font-medium text-ink-500 dark:border-white/15;
+  }
+
+  /* 技术栈 / 标签的小胶囊 */
+  .chip {
+    @apply rounded-full bg-ink-50 px-3 py-1 text-xs text-ink-700 dark:bg-white/5 dark:text-ink-100;
+  }
+
+  /* 演示区外框：固定 16:9，避免视频加载前后页面跳动 */
+  .demo-frame {
+    @apply aspect-video w-full overflow-hidden rounded-card border border-ink-100 bg-ink-50 dark:border-white/10 dark:bg-white/5;
+  }
+}
