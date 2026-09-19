@@ -509,20 +509,28 @@ node.agent_research_node(state, agent_runtime, reader, rule_engine, rag_store, m
 | 事件 `type` | 发布者 | 触发时机 | 前端用途 |
 |---|---|---|---|
 | `generate.started` | `worker` | 素材就绪、即将建图 | 进入「AI 生成中」 |
-| `stage.researching` | `node_agent` | Agent 工具表非空 | 阶段提示「正在核对数据」 |
-| `agent.tool` | `AgentLoop._tools_node` | 每次工具调用完成后 | 「AI 正在核对 X」（含 `ok`） |
-| `agent.done` | `AgentLoop.run` | 子图收敛后 | 带 `stop_reason` / `turns` / `tool_calls` |
+| `stage.researching` | `node_agent` | Agent 工具表非空 | 阶段提示「🔎 正在核对商品资料…」 |
+| `agent.tool` | `AgentLoop._tools_node` | 每次工具调用完成后 | 「🛠 已核对：商品素材」（**载荷键名是 `tool`**，内部工具名映射成业务名；`ok=false` → 「（未取到）」） |
+| `agent.done` | `AgentLoop.run` | 子图收敛后 | 阶段行：`completed` → 「✔ 资料核对完成」；`runtime_error` → 「⚠ 本次未参考历史资料（服务异常），文案按商品素材生成」；**预算/工具到顶（默认预算下的常态）与缺字段 → 不出行**。`stop_reason`/`turns`/`tool_calls` **只在载荷里**，不进界面（排障看 `evt` 流 / 日志 / `agent_trace`） |
 | `stage.generating` | `node_generate` | 生成前（含 `attempt`） | 打字机预备 |
 | `content.chunk` | `node_generate` | 流式每 ≤40 字一次 | **打字机正文**（唯一正文来源） |
 | `stage.evaluating` | `node_evaluate` | 评估前（含 `attempt`） | 阶段提示 |
-| `evaluate.result` | `node_evaluate` | 评估后 | `passed` / `score` / `violations` 计数 |
-| `stage.imaging` | `node_image` | 配图前（`source=uploaded\|ai`） | 阶段提示 |
+| `evaluate.result` | `node_evaluate` | 评估后 | 「✔ 合规评估：95 分（通过）」；载荷另有 `violations` 计数（未渲染） |
+| `stage.imaging` | `node_image` | 配图前（`source=uploaded\|ai`） | 「🎨 配图整理中…（来源：上传素材 / AI 生成）」 |
 | `image.ready` | `node_image` | **AI 图**落库后（上传图分支不发） | 图片就绪 |
 | `done` | `node_save_content` | 成功落库后 | 终态：完成 |
 | `hitl.waiting` | `worker` | 检测到 `__interrupt__` | 终态：等待人工审批（**没有它前端会一直转圈**） |
 | `approval.resumed` | `worker` | 收到 approval 后、resume 前 | 审批已回传 |
 | `rejected` | `worker` | resume 后 `status=rejected` | 终态：驳回 |
 | `failed` | `worker` | 异常收口 / 输入违禁词拦截 | 终态：失败（前端复位按钮） |
+
+> **阶段流/状态行只出现业务语言**（2026-09 用户反馈「这是非业务的数据，没人知道这是什么意思」）：
+> `stop_reason` / `turns` / `tool_calls` / 内部工具名 / `score=` / `source=uploaded` / `（Agent）` 这类实现细节
+> **一律不渲染**，只留在载荷里（排障看各事件对应的 `evt:{thread_id}` / 日志 / `agent_trace`）。
+> 三端（H5 / RN / 桌面）共用**一份**实现 `frontend/src/services/streamLabels.ts`（`formatEvent` 出明细行、
+> `statusLine` 出状态行）—— 桌面旧的那份拷贝已删除；那份拷贝正是 `agent.tool` 键名两边一起读错的温床
+> （生产者发 `tool`、两边都读 `name` → 界面上工具名常年空白）。回归由 `tests/streamLabels.test.ts` 用
+> **真实事件载荷**锁定（含一条"渲染结果不得出现上述内部字段"的负向断言）。
 
 > **两条写入路径，信封结构一致（已核对实现）**：节点内走注入的 `EventBus.publish()`，`worker._publish()` 则直接走 `RedisStreams.xadd()` ——
 > 两者最终都经 `_xadd()` 落盘（`adapters/redis_eventbus.py`），所以信封**完全相同**：字段 `data` = JSON 字符串，JSON 首键为 `schema_version`。
@@ -617,6 +625,7 @@ Redis Streams 是 backend ↔ ai-engine 的**唯一业务通道**，因此按队
 | 前端界面（React + antd） | ✅ 已实现（**P7**，`frontend/`） | 8 条路由（登录/商品/详情/审批/深链/合规/运维/成员），走 backend-api 的 43 个端点；只连 `/api/v1`（不直连 ai-engine/PG） |
 | 移动端 H5（React + antd-mobile） | ✅ 已实现（**P9**，`mobile-h5/`） | 登录 / 商品（列表+详情+SSE 实时生成）/ 审批（列表+详情+深链+批准驳回+补投）/ 我的；**与桌面端共享契约核心层**（`@pa/core` → `frontend/src/{api,services,store,types}`，页面壳各写各的）；只连 `/api/v1` |
 | 移动端原生 App（React Native + Expo） | ✅ 已实现（**P10**，`mobile-rn/`） | iOS + Android 一套代码；与 H5 的页面/组件**逐条对齐**（6 屏 + 深链），并**复用同一份契约核心层**：共享层新增「平台端口」（`frontend/src/services/platform.ts`）承载 6 个平台差异点（接口基址 / 会话回跳 / 过期事件 / 定时器 / JWT 解码 / SSE 与二进制传输），因此 `http.ts`（单飞续签 + 401 重放）与 `sse.ts`（`hitl.waiting` 终态 / `ready` 不重连 / 注释帧三态）**三端共用一份**；UI 为自研薄 UI（零 UI 依赖）；版本锁定与真机验证边界见 `mobile-rn/README.md` |
+| 作品集宣传页（**静态**，`portfolio/`） | ✅ 已实现（**P11**） | 个人作品合集（数据驱动，加作品=加一条数据）+ 四端演示位（Web / H5 / RN-Android / RN-iOS）+ 联系方式；**纯静态零后端依赖**（不调 `/api`，可独立部署到任意静态托管）；演示环境（域名 + 只读演示账号 + 成本护栏）未接入前「进入系统」是禁用占位态 + 邮件联系 |
 
 **当前仓库内可独立跑通的部分**：`__main__` → worker → 图 → 节点 → 适配器 → PG/Redis/OSS/Milvus，
 以及 `tests/` 里用 `InMemorySaver` 的图级测试（207 个用例，其中 195 个纯内存可跑、12 个需容器化 PG+Redis 否则自动 skip）。
@@ -1000,15 +1009,19 @@ GET /api/v1/products/{id}/stream?ticket=…    ← SSE：回放 + 尾随（无�
 | 任务 | 作用 | 失败时 |
 |---|---|---|
 | `WorkflowResultConsumer` | 消费 `result:workflow` 推进状态机 | 单轮异常退避重试，**不退出进程** |
-| `OutboxDeliverer` | 投递审批通知（outbox → 钉钉/控制台） | 指数退避重试，达上限转 `dlq` |
+| `OutboxDeliverer` | 投递审批通知（outbox → 钉钉/控制台） | 指数退避重试，达上限转 `dlq`；`payload.last_error` **只在未送达期间存在**（送达即清除）——「曾失败过」看 `retry_count > 0`，界面据此显示「已发送（重试 N 次后成功）」 |
 | `ApprovalRedriveWatchdog` | 补投「已定案但 ai-engine 未收到」的 resume | 同上，且带 Redis 节流防重复投递 |
 
 #### 一键启动（本地四进程 + 完整 RAG 链路）
+
+> 作品集宣传页（`portfolio/`，:5175）**不在这四进程内**：它零后端依赖、常年独立部署，
+> 单独一条命令起 —— `./scripts/dev-landing.sh`（理由见下方「作品集宣传页（`portfolio/`，P11）」段）。
 
 ```bash
 ./scripts/dev-up.sh          # 前台：四路日志实时滚动（[backend]/[ai-engine]/[frontend]/[mobile]），Ctrl-C 一键收盘
 ./scripts/dev-up.sh --detach # 后台：日志落盘 /tmp/padev/*.log，用 ./scripts/dev-logs.sh 跟进
 ./scripts/dev-down.sh        # 停四进程（容器保留）；--with-infra 连容器一起停（数据卷保留）
+./scripts/dev-landing.sh     # 作品集宣传页（portfolio/，:5175，纯静态无后端依赖；Ctrl-C 停）
 ./scripts/test-frontend.sh   # 桌面端用例（自带超时与「以文件级 ✓ 判定」的收尾逻辑，见 frontend/README）
 ./scripts/test-mobile.sh     # 移动端 H5 用例（同一判定口径，见 mobile-h5/README）
 ./scripts/test-mobile-rn.sh  # 移动端原生 App 用例（Jest + RNTL，同一判定口径，见 mobile-rn/README）
@@ -1146,6 +1159,9 @@ GET  /api/v1/ops/dlq?domain=job:generate   → 死信回看（只读；重投走
 | P6 | 合规词库/规则 CRUD + 快照预览；运维只读面（心跳/PEL/DLQ） | ✅ |
 | P7 | frontend（React 19 + antd 6 + Vite 8）：登录/商品/详情（打字机 + 轨迹）/审批（含深链）/合规/运维/成员，8 条路由 | ✅ |
 | P8 | nginx 双层 + 生产 compose + CI + 全栈冒烟 | ⏳ 待做 |
+| P9 | mobile-h5（React + antd-mobile）：登录 / 商品 / 详情（SSE）/ 审批（含深链）/ 我的；与桌面端共享契约核心层 | ✅ |
+| P10 | mobile-rn（React Native + Expo 57）：iOS + Android 一套代码（6 屏 + 深链）；共享层抽出「平台端口」承载 6 个平台差异点 | ✅ |
+| P11 | portfolio（作品集宣传页）：数据驱动的作品合集 + 四端演示位 + 联系方式；纯静态零后端依赖（Tailwind v4 只装在本模块） | ✅ |
 
 #### 前端（`frontend/`，P7）
 
@@ -1166,6 +1182,26 @@ GET  /api/v1/ops/dlq?domain=job:generate   → 死信回看（只读；重投走
 
 另外：删除**只有彻底删除**一条路径（软删端点已下线 → 405）、错误信封是 `{code,data,message}`（不是 `detail`）、
 OSS 预签名需 `product_id`（图片上传在商品详情页）。
+
+#### 作品集宣传页（`portfolio/`，P11）
+
+```text
+定位   : 个人作品合集展示页（第一个作品即 ProductAssistant）；将来加作品只加一条数据
+技术栈 : React 19 + TypeScript + Vite 8 + Tailwind CSS 4（原子化 CSS **只装在本模块**）
+入口   : http://localhost:5175（纯静态、无需后端；启动：./scripts/dev-landing.sh，也可独立部署到任意静态托管）
+数据   : src/data/projects.ts（唯一内容事实源）· 资产约定 public/demos/<slug>/<platform>.<ext>
+校验   : npx tsc --noEmit（0 错误）· npm test（3 文件 21 例）· npm run build（CSS 22KB / JS 230KB，gzip 4.5KB / 73.5KB）
+门禁   : 用例里有一条「声明即校验」——数据里写了 video/gif/poster 就必须在 public/ 下真实存在，
+         挡住「素材文件名写错 → 上线后是一块空白」（静态页上这类错没人会及时发现）
+```
+
+三处刻意的设计取舍（详见 `portfolio/README.md`）：
+
+1. **单独开模块而不是在 `frontend/` 加路由**：作品集是跨项目的长期资产，生命周期与业务前端不同；
+   本模块零后端依赖、自包含，将来要拆成独立仓库可原样搬走（`main.tsx` 里没有 `/api`、没有代理）；
+2. **四端演示「一次只挂载一个播放器」**：手机上 4 个视频同时自动播会掉帧发热；顺带做到「未点开的端零下载」，代价是切回来重新加载（片段短，可接受）；
+3. **「进入系统」三态**：演示环境未接入时是**禁用占位态 + 邮件联系**（访客不会点到一个 404），
+   接入时只改 `data/projects.ts` 里的 `links.live` 一行 —— 占位态另有一条用例守着，改状态时会提醒你同步断言。
 
 
 
