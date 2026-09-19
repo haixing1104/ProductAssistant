@@ -1,9 +1,11 @@
-// 「我的」（RN 版）—— 与 H5 的 `MePage` 同口径：身份 / 退出登录 / 只在电脑端实现的模块入口。
+// 「我的」（RN 版）—— 与 H5 的 `MePage` 同口径：身份 / 退出登录（+ 超管的组织切换）。
 //
-// 为什么这些模块不做移动版（见 mobile-h5/README「架构决策」）:
-//   运维面板（PEL/DLQ 读数）、合规词库（正则 CRUD）、用户管理属于**低频 + 表格密集**的后台操作，
-//   手机上做一遍的收益远低于成本。这里给的是入口（用系统浏览器打开桌面端），而不是假装做了个残缺版本。
-import { Linking, StyleSheet, Text, View } from "react-native";
+// 为什么这里**没有**「合规词库 / 运维面板 / 用户管理」入口（2026-09 决策，与 H5 同步）:
+//   这三块属于**低频 + 表格密集**的后台操作，移动端不做页面 —— 既然不做，就也不给入口。
+//   旧做法是用系统浏览器打开桌面端（`resolveDesktopBaseUrl()`，dev 默认 `http://localhost:5173`），
+//   但**手机上跑原生 app 时 `localhost` 就是手机自己**，这个链接天然是死链。要操作请用桌面端工作台。
+//   （`resolveDesktopBaseUrl` 本身保留：深链前缀仍在用，见 `navigation/RootNavigator` 的 `linking`。）
+import { StyleSheet, View } from "react-native";
 
 import Button from "../ui/Button";
 import { ListRow, ListSection, PreWrapText } from "../ui/List";
@@ -12,20 +14,12 @@ import Tag from "../ui/Tag";
 import { colors, font, space } from "../ui/theme";
 import { Dialog, Toast } from "../ui/feedback";
 import { authApi } from "@pa/core/api";
-import { ROLE_LABEL, canApprove, isAdmin, useAuthStore } from "@pa/core/store/authStore";
+import { ROLE_LABEL, canApprove, useAuthStore } from "@pa/core/store/authStore";
 
 import OrgScopeSection from "../components/OrgScopeSection";
-import { resolveDesktopBaseUrl } from "../platform/env";
 import { forgetOrg } from "../services/rememberOrg";
 
-/** 只在电脑端实现的模块（低频 + 表格密集）：RN 里只给浏览器入口，不做残缺版。 */
-const DESKTOP_ONLY = [
-  { path: "/compliance", label: "合规词库", roles: ["admin", "reviewer"] },
-  { path: "/ops", label: "运维面板", roles: ["admin"] },
-  { path: "/members", label: "用户管理", roles: ["admin"] },
-];
-
-/** 「我的」页：身份/审批权限 + **组织切换（超管）** + 退出登录 + 清除记住的组织名 + 电脑端模块的浏览器入口。 */
+/** 「我的」页：身份/审批权限 + **组织切换（超管）** + 退出登录 + 清除记住的组织名。 */
 export default function MeScreen({ onSignedOut }: { onSignedOut: () => void }) {
   const user = useAuthStore((state) => state.user);
   const clear = useAuthStore((state) => state.clear);
@@ -41,16 +35,6 @@ export default function MeScreen({ onSignedOut }: { onSignedOut: () => void }) {
       },
     });
   };
-
-  const openDesktop = (path: string) => {
-    // 桌面端页面不在本 app 里：用系统浏览器打开（**原生端没有"新标签页"概念**）
-    const url = `${resolveDesktopBaseUrl()}${path}`;
-    void Linking.openURL(url).catch(() =>
-      Toast.show({ icon: "fail", content: `无法打开浏览器：${url}` }),
-    );
-  };
-
-  const canSeeDesktop = isAdmin(user?.role) || canApprove(user?.role);
 
   return (
     <View style={styles.page}>
@@ -68,16 +52,8 @@ export default function MeScreen({ onSignedOut }: { onSignedOut: () => void }) {
         />
       </ListSection>
 
-      {/* 平台超管的组织切换（非超管不渲染）：放在「账号」之后、「电脑端模块」之前 */}
+      {/* 平台超管的组织切换（非超管不渲染） */}
       <OrgScopeSection />
-
-      {canSeeDesktop ? (
-        <ListSection header="仅电脑端提供（点按用浏览器打开）">
-          {DESKTOP_ONLY.filter((item) => item.roles.includes(user?.role ?? "")).map((item) => (
-            <ListRow key={item.path} label={item.label} onPress={() => openDesktop(item.path)} />
-          ))}
-        </ListSection>
-      ) : null}
 
       <View style={styles.actions}>
         <Button block variant="danger" fill="outline" size="large" onPress={logout} testID="pa-logout">

@@ -10,7 +10,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  desktopBaseUrl,
   formatPrice,
   formatSeconds,
   formatTime,
@@ -83,17 +82,5 @@ describe("formatPrice / truncate / formatSeconds", () => {
     expect(formatSeconds(90)).toBe("1 分钟");
     expect(formatSeconds(7200)).toBe("2 小时");
     expect(formatSeconds(null)).toBe("-");
-  });
-});
-
-describe("desktopBaseUrl（只在电脑端实现的模块入口）", () => {
-  it("dev（移动端 5174）指向桌面端 5173，同 host 便于共享登录态", () => {
-    expect(desktopBaseUrl({ protocol: "http:", hostname: "192.168.1.5", port: "5174" })).toBe(
-      "http://192.168.1.5:5173",
-    );
-  });
-
-  it("生产同域部署（/ 与 /m/）返回空串 → 调用方拼出同源相对路径", () => {
-    expect(desktopBaseUrl({ protocol: "https:", hostname: "pa.example.com", port: "" })).toBe("");
   });
 });

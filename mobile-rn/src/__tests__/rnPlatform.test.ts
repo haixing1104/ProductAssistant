@@ -80,7 +80,7 @@ describe("地址解析（RN 没有 dev 代理）", () => {
     );
   });
 
-  it("桌面端地址默认 :5173（「我的」页的电脑端入口）", () => {
+  it("桌面端地址默认 :5173（深链前缀用；「我的」页的桌面入口已于 2026-09 移除）", () => {
     expect(resolveDesktopBaseUrl({})).toBe("http://localhost:5173");
     expect(resolveDesktopBaseUrl({ EXPO_PUBLIC_DESKTOP_BASE_URL: "https://pa.example.com/" })).toBe(
       "https://pa.example.com",

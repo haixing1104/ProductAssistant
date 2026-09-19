@@ -28,7 +28,10 @@ export function resolveApiBaseUrl(env: EnvLike = process.env as EnvLike, os: str
 }
 
 /**
- * 桌面工作台地址（「我的」页里"仅电脑端模块"的跳转入口）。
+ * 桌面工作台地址（**深链前缀**：`navigation/RootNavigator` 的 `linking.prefixes`）。
+ *
+ * 2026-09 起「我的」页不再用它跳桌面端（那三个模块移动端不提供、也不给入口），
+ * 当前唯一消费方就是深链 —— 生产环境需要真实域名来匹配对外分享的链接。
  * dev 默认 `http://localhost:5173`；生产同域部署时填真实域名。
  */
 export function resolveDesktopBaseUrl(env: EnvLike = process.env as EnvLike): string {

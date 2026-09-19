@@ -97,17 +97,3 @@ export function formatSeconds(seconds?: number | null): string {
   return `${Math.floor(minutes / 60)} 小时`;
 }
 
-/**
- * 桌面端基址（「我的」页把只在电脑端实现的模块指向桌面端）。
- *
- * 规则（与两套前端的部署形态一一对应）:
- *   · dev（本仓库的一键启动）：移动端固定 :5174、桌面端固定 :5173，同一 hostname
- *     —— cookie 与 host 绑定、与端口无关，所以在**同一浏览器**里两边共享登录态；
- *   · 生产：两套前端同域部署（`/` 桌面、`/m/` 移动），桌面端就是同源根路径 → 返回 ""，
- *     调用方拼出来的是 `/ops` 这样的相对路径。
- * 抽成纯函数（注入 location）是为了能单测，不去 mock 全局 window。
- */
-export function desktopBaseUrl(loc: { protocol: string; hostname: string; port: string }): string {
-  return loc.port === "5174" ? `${loc.protocol}//${loc.hostname}:5173` : "";
-}
-
