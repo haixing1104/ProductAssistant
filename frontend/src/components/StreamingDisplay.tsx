@@ -8,6 +8,7 @@ import { Button, Space, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 
 import { connectProductStream, type SseFrame } from "../services/sse";
+import { formatEvent, statusLine } from "../services/streamLabels";
 
 /** 流式过程中已就绪的配图（`image.ready` 事件累积而来，可点开大图）。 */
 export interface LiveImage {
@@ -36,58 +37,10 @@ interface Props {
   height?: number;
 }
 
-// 事件 → 中文阶段行（PA 的 15 类事件 + `ready` 控制帧）
-const TYPE_LABELS: Record<string, string> = {
-  "generate.started": "▶ 开始生成",
-  "stage.researching": "🔎 正在核对数据（Agent）",
-  "agent.tool": "🛠 AI 调用工具",
-  "agent.done": "✔ 数据核对完成",
-  "stage.generating": "✎ 文案生成中…",
-  "stage.evaluating": "⚖ 合规评估中…",
-  "evaluate.result": "✔ 评估结果",
-  "stage.imaging": "🎨 配图整理/生成中…",
-  "image.ready": "✔ AI 配图已就绪",
-  "content.chunk": "",
-  "hitl.waiting": "✋ 需人工审批，已转审批中心",
-  "approval.resumed": "↻ 审批已回传，恢复写入",
-  done: "✔ 生成完成",
-  rejected: "✘ 已被驳回（已退回草稿）",
-  failed: "✘ 生成失败",
-  ready: "（暂无进行中任务）",
-};
-
-/** 把一帧转成可读的阶段行（正文 chunk 返回空串，不占据阶段流）。 */
-export function formatEvent(frame: SseFrame): string {
-  if (frame.comment) return `… ${frame.comment}`;
-  const label = TYPE_LABELS[frame.type ?? ""] ?? `事件：${frame.type ?? "raw"}`;
-  const data = (frame.data ?? {}) as {
-    text?: string;
-    score?: number | string;
-    passed?: boolean;
-    attempt?: number;
-    ok?: boolean;
-    name?: string;
-    stop_reason?: string;
-    result?: string;
-  };
-  switch (frame.type) {
-    case "evaluate.result":
-      return `${label}：score=${data.score}${data.passed ? "（通过）" : "（未过）"}`;
-    case "stage.generating":
-    case "stage.evaluating":
-      return data.attempt ? `${label}（第 ${data.attempt} 次）` : label;
-    case "agent.tool":
-      return `${label}：${data.name ?? ""} ${data.ok === false ? "（失败）" : ""}`.trim();
-    case "agent.done":
-      return `${label}（stop_reason=${data.stop_reason ?? "-"}）`;
-    case "stage.imaging":
-      return `${label}（来源：${(data as { source?: string }).source ?? "-"}）`;
-    case "approval.resumed":
-      return data.result === "rejected" ? "↻ 审批驳回，正在退回草稿…" : label;
-    default:
-      return label;
-  }
-}
+// 阶段行文案不在本地实现：统一用共享层 `../services/streamLabels`（formatEvent / statusLine）。
+// 这里曾经有一份"与移动端逐条对齐"的拷贝，注释还写着"改一侧必须改另一侧" —— 结果 `agent.tool`
+// 的键名两边一起读错（生产者发 `tool`，两边都读 `name`），界面上工具名常年空白。
+// **一份实现 + 用真实事件载荷断言**才是可靠的防再发方式。
 
 /**
  * 生成过程的实时视图（打字机正文 / 阶段 / 配图）。
@@ -156,7 +109,8 @@ export default function StreamingDisplay({
         callbacks.current.onDone?.();
         return;
       }
-      setState(`阶段：${frame.type ?? "raw"}`);
+      // 状态行只给业务短句（**不透出内部事件名**，如 `agent.tool`）
+      setState(statusLine(frame));
     };
 
     void connectProductStream({

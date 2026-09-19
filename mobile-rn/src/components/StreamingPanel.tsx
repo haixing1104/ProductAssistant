@@ -16,7 +16,7 @@ import { PreWrapText } from "../ui/List";
 import Tag from "../ui/Tag";
 import { colors, font, radius, space } from "../ui/theme";
 import { connectProductStream, type SseFrame } from "@pa/core/services/sse";
-import { formatEvent } from "@pa/core/services/streamLabels";
+import { formatEvent, statusLine } from "@pa/core/services/streamLabels";
 
 interface Props {
   productId: string;
@@ -97,7 +97,8 @@ export default function StreamingPanel({
         callbacks.current.onDone?.();
         return;
       }
-      setStatus(`阶段：${frame.type ?? "raw"}`);
+      // 状态行只给业务短句（**不透出内部事件名**，如 `agent.tool`）
+      setStatus(statusLine(frame));
     };
 
     void connectProductStream({

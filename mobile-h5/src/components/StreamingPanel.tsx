@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { connectProductStream, type SseFrame } from "@pa/core/services/sse";
 
-import { formatEvent } from "@pa/core/services/streamLabels";
+import { formatEvent, statusLine } from "@pa/core/services/streamLabels";
 
 /** 流式过程中已就绪的配图（可点开放大看细节）。 */
 export interface LiveImage {
@@ -99,7 +99,8 @@ export default function StreamingPanel({
         callbacks.current.onDone?.();
         return;
       }
-      setState(`阶段：${frame.type ?? "raw"}`);
+      // 状态行只给业务短句（**不透出内部事件名**，如 `agent.tool`）
+      setState(statusLine(frame));
     };
     void connectProductStream({
       productId,
