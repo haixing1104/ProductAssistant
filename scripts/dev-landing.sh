@@ -83,5 +83,7 @@ fi
 
 if [ "${TASK}" = "dev" ]; then
   ok "宣传页 dev server：http://localhost:${PORT}（纯静态、无需后端；Ctrl-C 停止）"
+  info "卡片上的「开始使用」在 dev 指向本机 :5173（PC Web）/ :5174（Mobile H5）的 /login；"
+  info "要真的登进去看数据，另开一个终端先起 ./scripts/dev-up.sh（backend + 两个前端）"
 fi
 exec npm run "${TASK}"

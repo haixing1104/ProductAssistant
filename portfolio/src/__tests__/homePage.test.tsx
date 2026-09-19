@@ -28,11 +28,16 @@ describe("作品集首页", () => {
 
   // 这条用例就是「演示环境未接入」这个状态的契约：将来 `links.live` 填上之后，
   // 它会失败并提醒你一起把占位态的断言改掉（否则页面上会同时出现死按钮和真链接）。
-  it("演示环境未接入时，「进入系统」是禁用占位态，而不是一个死链", () => {
+  //
+  // 两个入口都要守住：底部「进入系统 →」与标题行右侧的「开始使用」。
+  // 后者在 dev 下由 `.env.development` 注入本机端口（5173 / 5174），而 vitest 的 mode 是
+  // `test`（不读 .env.development）—— 所以这里看到的正是**生产未接入**的样子。
+  it("演示环境未接入时：「进入系统」是禁用占位态、「开始使用」不渲染（都不是死链）", () => {
     render(<App />);
 
     expect(screen.getByRole("button", { name: "演示环境准备中" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /进入系统/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /开始使用/ })).toBeNull();
   });
 
 });

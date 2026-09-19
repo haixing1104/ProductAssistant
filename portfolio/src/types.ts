@@ -64,8 +64,19 @@ export type DemoAsset = {
 };
 
 export type ProjectLinks = {
-  /** 「进入系统」的地址。**为空即禁用态**（占位按钮 + 邮件联系），填上就自动变真链接。 */
+  /**
+   * **PC Web 入口基址**（登录页 = 基址 + `/login`）。为空即禁用态（占位按钮 + 邮件联系）。
+   *
+   * 只存基址、不存完整地址：登录路径三端一致（`frontend/src/main.tsx` 与
+   * `mobile-h5/src/main.tsx` 都是 `/login`），由 `lib/entry.ts` 的 `entryUrl()` 拼一次 ——
+   * 就不会出现"某处写了 `/login`、另一处忘了写"的分叉。
+   *
+   * dev 的 `http://localhost:5173` **不写在这里**：下面的门禁（`__tests__/projects.test.ts`）
+   * 要求 https，dev 地址走 `portfolio/.env.development` 的 `VITE_ENTRY_BASE_URL`。
+   */
   live?: string;
+  /** **Mobile H5 入口基址**（登录页 = 基址 + `/login`）；不填回退 `live`（同一套系统、两个入口）。 */
+  liveH5?: string;
   repo?: string;
 };
 

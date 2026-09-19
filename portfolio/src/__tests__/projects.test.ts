@@ -139,14 +139,26 @@ describe("作品数据（src/data/projects.ts）", () => {
     }
   });
 
-  it("links.live 一旦填值就必须是 https 且不带尾斜杠", () => {
+  // 入口基址的门禁：`links.live`（PC Web）与 `links.liveH5`（Mobile H5）都只存**基址**，
+  // 登录页由 `lib/entry.ts` 的 `entryUrl()` 拼 `/login` —— 所以这里额外挡"把 /login 写进基址"
+  // （两处各拼一次，迟早出现 `//login` 这种地址）。
+  // 这条门禁也是"dev 的 http://localhost 不能写进数据"的原因：它要求 https。
+  it("links.live / liveH5 一旦填值：https、不带尾斜杠、不含 /login", () => {
     for (const project of projects) {
-      const live = project.links.live;
-      if (!live) continue;
-      expect(live.startsWith("https://"), `${project.slug}: live 必须是 https（http 会被浏览器标记为不安全）`).toBe(
-        true,
-      );
-      expect(live.endsWith("/"), `${project.slug}: live 不要以 / 结尾`).toBe(false);
+      const fields = [
+        ["live", project.links.live],
+        ["liveH5", project.links.liveH5],
+      ] as const;
+
+      for (const [field, value] of fields) {
+        if (!value) continue;
+        const where = `${project.slug}.${field}`;
+        expect(value.startsWith("https://"), `${where} 必须是 https（http 会被浏览器标记为不安全）`).toBe(
+          true,
+        );
+        expect(value.endsWith("/"), `${where} 不要以 / 结尾`).toBe(false);
+        expect(value.includes("/login"), `${where} 是基址，别把 /login 写进来（entryUrl 会拼）`).toBe(false);
+      }
     }
   });
 });
