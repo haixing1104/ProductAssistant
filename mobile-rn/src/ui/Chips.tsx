@@ -58,6 +58,16 @@ export default function Chips({ options, value, onChange, scrollable = false, te
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      /**
+       * ⚠️ **必须显式压掉 RN ScrollView 的 `baseHorizontal`**（RN 0.86 `ScrollView.js:1887`：
+       * `{ flexGrow: 1, flexShrink: 1, flexDirection: "row" }`）。
+       *
+       * 不写 style 时 `flexGrow: 1` 作用在**父容器的竖直主轴**上 → 这条横向筛选行会纵向长大去吃空白，
+       * 把下面的列表推到屏幕中段；列表自己也带 `flexGrow: 1`，两者平分空白，于是「只剩 1 条数据时
+       * 看起来垂直居中、上下各留一块空白」（2026-09 真机截图定位到就是它）。
+       * 横向 chips 行的高度只该由内容决定 —— 所以 flexGrow/flexShrink 都归零。
+       */
+      style={styles.scroll}
       contentContainerStyle={styles.scrollContent}
       testID={testID}
     >
@@ -68,6 +78,8 @@ export default function Chips({ options, value, onChange, scrollable = false, te
 
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: space.md, paddingVertical: space.sm },
+  /** 横向筛选行：高度由内容决定（见上面 ⚠️；不能让它纵向 flexGrow）。 */
+  scroll: { flexGrow: 0, flexShrink: 0 },
   scrollContent: { paddingHorizontal: space.md, paddingVertical: space.sm },
   row: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   chip: {

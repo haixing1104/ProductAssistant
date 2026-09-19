@@ -7,6 +7,11 @@
 // 而且**连接器本身（含重连退避、Last-Event-ID 续传）就是共享层那一份** —— 这里只做展示。
 //
 // 移动端差异: 正文区固定高度 + 自动滚底（用户往上翻时不打断）；配图缩略图点开看大图。
+//
+// ⚠️ **嵌套滚动**（RN 特有，2026-09 真机反馈后补）：本组件会被放进详情页的外层 `ScrollView` 里，
+//    于是出现了两个**同方向**的 ScrollView。外层页面会抢手势 —— 用户想滑流式正文却整页滚走。
+//    处理三件事：显式 `nestedScrollEnabled`；内容没溢出时 `scrollEnabled={false}`（不白吃手势）；
+//    自动滚底改成「以拖动意图为准」，并给一个「↓ 最新」按钮让用户能明确回到尾部。
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, View } from "react-native";
 
@@ -36,7 +41,8 @@ interface Props {
  * 实时生成面板（RN 版）：打字机正文 + 阶段 + 配图。
  *
  * 语义与 H5/桌面端**逐条一致**（`hitl.waiting` 是终态 / `ready` 不重连 / 注释帧三态），
- * 差异只在渲染：正文固定高度 + 自动滚底（用户往上翻时不打断）、配图点开放大。
+ * 差异只在渲染：正文固定高度 + 自动滚底（用户往上翻时不打断）、配图点开放大，
+ * 以及**嵌套滚动的三处处理**（见文件头 ⚠️）。
  */
 export default function StreamingPanel({
   productId,
@@ -55,6 +61,24 @@ export default function StreamingPanel({
   const [attemptSeed, setAttemptSeed] = useState(0); // 「重新连接」按钮：+1 触发重连
   const scrollRef = useRef<ScrollView | null>(null);
   const pinnedRef = useRef(true); // 用户没往上翻时自动滚到底
+  /** 视口高度（`onLayout` 记录）：判断"内容是否溢出"用（不溢出就不吃手势）。 */
+  const boxHeightRef = useRef(0);
+  /** `pinnedRef` 的渲染镜像：控制「↓ 最新」按钮与 auto-scroll 的可视状态。 */
+  const [pinned, setPinned] = useState(true);
+  /** 正文是否已超出固定高度（= 内层真的可滚）。 */
+  const [overflowing, setOverflowing] = useState(false);
+
+  /** 更新"是否贴底"（ref 供命令式判定，state 供渲染）。 */
+  const markPinned = (value: boolean) => {
+    pinnedRef.current = value;
+    setPinned(value);
+  };
+
+  /** 回到最新：恢复自动滚底并立即滚到尾部（用户明确表达"我要看最新"）。 */
+  const jumpToLatest = () => {
+    markPinned(true);
+    scrollRef.current?.scrollToEnd({ animated: false });
+  };
   // 回调放 ref：避免父级每次渲染都重连（连接只该由 productId / attemptSeed 变化触发）
   const callbacks = useRef({ onTerminal, onWaiting, onDone, onNoActiveTask });
   callbacks.current = { onTerminal, onWaiting, onDone, onNoActiveTask };
@@ -143,6 +167,12 @@ export default function StreamingPanel({
       <View style={styles.header}>
         <Tag color={fatal ? "danger" : "primary"}>{fatal ? "已断开" : "实时"}</Tag>
         <PreWrapText style={styles.status}>{status}</PreWrapText>
+        {/* 用户往上翻离尾部时给一条明确的回退路径（弱网下自动滚底会停下，没有它只能干等） */}
+        {!pinned && overflowing ? (
+          <Button size="mini" variant="primary" fill="outline" onPress={jumpToLatest} testID="pa-stream-jump-latest">
+            ↓ 最新
+          </Button>
+        ) : null}
         {fatal ? (
           <Button
             size="mini"
@@ -158,15 +188,26 @@ export default function StreamingPanel({
           </Button>
         ) : null}
       </View>
+      {/* 嵌套滚动（⚠️ 见文件头）：a) 显式打开 —— 普通 ScrollView 不写就走平台默认，
+          Android 上内层会拿不到手势；b) 内容没溢出时关掉滚动 —— 否则白吃一次滑动；
+          c) 溢出口径用 RN 自己的判定（contentSize > layoutMeasurement）。 */}
       <ScrollView
         ref={scrollRef}
         style={[styles.box, { height }]}
+        nestedScrollEnabled
+        scrollEnabled={overflowing}
+        onLayout={(event) => {
+          boxHeightRef.current = event.nativeEvent.layout.height;
+        }}
         onScroll={(event) => {
           const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-          pinnedRef.current = contentSize.height - contentOffset.y - layoutMeasurement.height < 24;
+          markPinned(contentSize.height - contentOffset.y - layoutMeasurement.height < 24);
         }}
+        // 手指接管优先：拖动期间停止自动滚底（流式追加很频繁，只靠 24px 阈值会误判并把人拽回尾部）
+        onScrollBeginDrag={() => markPinned(false)}
         scrollEventThrottle={16}
-        onContentSizeChange={() => {
+        onContentSizeChange={(_width, height) => {
+          setOverflowing(height > boxHeightRef.current);
           if (pinnedRef.current) scrollRef.current?.scrollToEnd({ animated: false });
         }}
         testID="pa-stream-box"

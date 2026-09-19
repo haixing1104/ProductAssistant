@@ -135,7 +135,11 @@ export const RN_PLATFORM: PaPlatform = {
       headers: { "Content-Type": contentType },
     });
     if (result.status < 200 || result.status >= 300) {
-      throw new Error(`OSS 直传失败 HTTP ${result.status}`);
+      // **必须把 OSS 的响应体带上**：403 是 SignatureDoesNotMatch / AccessDenied，
+      // 404 是 NoSuchBucket，而 503 SlowDown 是限流 —— 只报状态码时"图传不上去"
+      // 永远无法定位（2026-09 真机实测：presign 200 之后 PUT 静默失败、没有任何线索）。
+      const detail = (result.body ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+      throw new Error(`OSS 直传失败 HTTP ${result.status}${detail ? `：${detail}` : ""}`);
     }
   },
 };

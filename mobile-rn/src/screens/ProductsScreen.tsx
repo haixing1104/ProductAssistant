@@ -54,6 +54,14 @@ export default function ProductsScreen({ onOpenDetail }: { onOpenDetail: (produc
   const [purgeTarget, setPurgeTarget] = useState<Product | null>(null);
   const [purgeReason, setPurgeReason] = useState("");
   const [csvErrors, setCsvErrors] = useState<CsvRowError[]>([]);
+  /**
+   * 下拉刷新指示器必须**受控**（只反映"用户下拉"这一次）。
+   *
+   * 为什么不能用 `list.isRefetching`：purge/保存/生成之后我们会 `invalidateQueries`，
+   * 那些**后台** refetch 也会让 `isRefetching` 变 true → 指示器凭空出现并把内容顶下去，
+   * 看起来就是"列表顶部留了一块占位"（2026-09 真机反馈的现场之一）。
+   */
+  const [refreshing, setRefreshing] = useState(false);
 
   const list = useInfiniteQuery({
     queryKey: ["products", statusFilter],
@@ -123,6 +131,16 @@ export default function ProductsScreen({ onOpenDetail }: { onOpenDetail: (produc
     }
   };
 
+  /** 用户下拉刷新（受控 refreshing：结束后必须复位，否则指示器永远转）。 */
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await list.refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const renderItem = (item: Product) => (
     <Card
       title={item.title}
@@ -187,12 +205,20 @@ export default function ProductsScreen({ onOpenDetail }: { onOpenDetail: (produc
       ) : list.isError ? (
         <QueryError what="商品列表加载" error={list.error} onRetry={() => void list.refetch()} />
       ) : (
+        /**
+         * ⚠️ Android 上 FlatList 的 `removeClippedSubviews` **默认是 true**
+         * （RN 0.86 `Libraries/Lists/FlatList.js`: "The default value is true for Android"）——
+         * 数据变短（如彻底删除一行）后旧 cell 的视图剥离不干净，表现为
+         * 「被删的那行留下空占位、下面几行不往上顶」（2026-09 真机反馈）。
+         * 本列表每页 ≤10 张卡，关掉它没有任何性能代价。
+         */
         <FlatList
           data={items}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => renderItem(item)}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={list.isRefetching} onRefresh={() => void list.refetch()} />}
+          removeClippedSubviews={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
           onEndReachedThreshold={0.4}
           onEndReached={() => {
             if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();

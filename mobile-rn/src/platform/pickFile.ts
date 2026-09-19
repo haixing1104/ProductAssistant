@@ -11,6 +11,16 @@ import type { PaUploadFile } from "@pa/core/services/platform";
 /** 与 H5 的 `IMAGE_TYPES` 同口径（后端 presign 只接受这三种）。 */
 export const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
+/**
+ * 归一化 MIME：部分 Android 相册提供方会给出 `image/jpg`（非标准写法）。
+ *
+ * 为什么必须在**上传前**归一：这个字符串参与 OSS SigV1 签名（见 `rnPlatform.putBinary` 注释），
+ * 必须"送 presign 的"与"PUT 带上的"逐字一致；同时它还要过上面的白名单。
+ */
+function normalizeImageType(type: string): string {
+  return type === "image/jpg" ? "image/jpeg" : type;
+}
+
 /** 选一个 CSV（商品批量导入）。取消返回 null。 */
 export async function pickCsvFile(): Promise<PaUploadFile | null> {
   const result = await DocumentPicker.getDocumentAsync({
@@ -46,7 +56,12 @@ export async function pickImageFile(): Promise<PickedImage | null> {
   });
   if (result.canceled || result.assets.length === 0) return null;
   const asset = result.assets[0];
-  const type = asset.mimeType ?? "image/jpeg";
+  const type = normalizeImageType(asset.mimeType ?? "image/jpeg");
+  // 白名单必须在**选完就判**：后端 presign 只接受 jpeg/png/webp（`ALLOWED_CONTENT_TYPES`），
+  // 不拦的话 HEIC/GIF 会一路走到 presign 才失败，用户只看到一句"请求有误"（2026-09 真机反馈）。
+  if (!IMAGE_TYPES.has(type)) {
+    throw new Error(`只支持 JPG/PNG/WebP 图片（当前：${type}），请换一张或先转成 JPG`);
+  }
   const name = asset.fileName ?? `product-${Date.now()}.${type.split("/")[1] ?? "jpg"}`;
   return { file: { uri: asset.uri, name, type }, size: asset.fileSize ?? 0 };
 }

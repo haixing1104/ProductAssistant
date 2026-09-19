@@ -236,9 +236,26 @@ describe("RN 平台实现", () => {
       expect(options.headers["Content-Type"]).toBe("image/jpeg");
     });
 
-    it("非 2xx 抛错（页面据此提示失败，而不是假装成功）", async () => {
-      FileSystem.uploadAsync.mockResolvedValue({ status: 403, headers: {}, body: "denied" });
+    it("非 2xx 抛错，并**带上 OSS 响应体**（否则 403/503 永远无法定位）", async () => {
+      FileSystem.uploadAsync.mockResolvedValue({
+        status: 403,
+        headers: {},
+        body: '<Error><Code>SignatureDoesNotMatch</Code></Error>',
+      });
+      // 状态码：页面据此提示失败，而不是假装成功
       await expect(RN_PLATFORM.putBinary("https://oss/put", "image/jpeg", file)).rejects.toThrow("HTTP 403");
+      // 响应体：403 的三种可能（签名/鉴权/桶策略）只有它能区分 —— 2026-09 真机上传失败时正是缺这个
+      await expect(RN_PLATFORM.putBinary("https://oss/put", "image/jpeg", file)).rejects.toThrow(
+        /SignatureDoesNotMatch/,
+      );
+    });
+
+    it("成功时（2xx）不抛错；响应体为空时错误信息也不留悬空冒号", async () => {
+      FileSystem.uploadAsync.mockResolvedValue({ status: 200, headers: {}, body: "" });
+      await expect(RN_PLATFORM.putBinary("https://oss/put", "image/jpeg", file)).resolves.toBeUndefined();
+
+      FileSystem.uploadAsync.mockResolvedValue({ status: 500, headers: {}, body: "" });
+      await expect(RN_PLATFORM.putBinary("https://oss/put", "image/jpeg", file)).rejects.toThrow("OSS 直传失败 HTTP 500");
     });
 
     it("缺少本地路径（例如误传 Web 的 File）立即失败，不发起上传", async () => {

@@ -6,6 +6,7 @@
 // ② **带评估命中点放行必须写理由**（写 approval_overrides 审计），与后端 422 同口径。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import axios from "axios";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import ApprovalDetailScreen from "../screens/ApprovalDetailScreen";
@@ -123,5 +124,41 @@ describe("审批详情（RN）", () => {
     await fireEvent.changeText(view.getByTestId("pa-feedback"), "标题过长且含极限词，请重写");
     await fireEvent.press(view.getByTestId("pa-decide-submit"));
     await waitFor(() => expect(mockApi.reject).toHaveBeenCalledWith("a-1", "标题过长且含极限词，请重写"));
+  });
+
+  it("「根本没到后端」的失败自动重试一次（2026-09 真机：隧道边缘 503，用户被迫手动再点）", async () => {
+    mockApi.get.mockResolvedValue(approval());
+    // 第一次：网络层失败（无响应 = 请求没到后端）；第二次：成功
+    const networkError = new axios.AxiosError("Network Error");
+    mockApi.approve
+      .mockRejectedValueOnce(networkError)
+      .mockResolvedValueOnce({ approval_id: "a-1", status: "approved", resume_enqueued: true });
+
+    const view = await renderScreen({ approvalId: "a-1" });
+    await fireEvent.press(await view.findByTestId("pa-approve"));
+    await fireEvent.changeText(await view.findByTestId("pa-feedback"), "已人工确认，命中点为描述性用语");
+    await fireEvent.press(view.getByTestId("pa-decide-submit"));
+
+    // 定案是 CAS（重复只会 409，不会重复上架）→ 重试一次是安全的；这里固化的就是"会自动重试"
+    await waitFor(() => expect(mockApi.approve).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    expect(mockApi.approve).toHaveBeenLastCalledWith("a-1", "已人工确认，命中点为描述性用语");
+  });
+
+  it("后端已给出结论的失败（4xx 信封）**不重试**：重试只会把 409/403 再撞一遍", async () => {
+    mockApi.get.mockResolvedValue(approval());
+    const conflict = new axios.AxiosError("Conflict");
+    // @ts-expect-error 测试替身：只填被测代码会读到的字段（PA 信封的 409）
+    conflict.response = { status: 409, data: { code: 409, data: null, message: "该审批单已被他人定案" } };
+    mockApi.approve.mockRejectedValue(conflict);
+
+    const view = await renderScreen({ approvalId: "a-1" });
+    await fireEvent.press(await view.findByTestId("pa-approve"));
+    await fireEvent.changeText(await view.findByTestId("pa-feedback"), "已人工确认，命中点为描述性用语");
+    await fireEvent.press(view.getByTestId("pa-decide-submit"));
+
+    await waitFor(() => expect(mockApi.approve).toHaveBeenCalledTimes(1));
+    // 等过重试窗口（retryDelay 800ms）后仍是 1 次：4xx 是"后端已给出结论"，重试没有意义
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(mockApi.approve).toHaveBeenCalledTimes(1);
   });
 });

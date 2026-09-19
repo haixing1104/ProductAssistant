@@ -205,7 +205,9 @@ export default function ProductDetailScreen({ productId, onBack }: { productId: 
         right={<ProductStatusTag status={product.status} />}
       />
 
-      <ScrollView contentContainerStyle={styles.scrollBody} testID="pa-product-detail">
+      {/* 外层页面滚动：显式打开嵌套滚动 —— 里面「AI 实时生成」是一个固定高度的内层 ScrollView，
+          Android 上父层不开嵌套滚动会抢掉内层手势（想滑流式正文却整页滚走，2026-09 真机反馈）。 */}
+      <ScrollView contentContainerStyle={styles.scrollBody} nestedScrollEnabled testID="pa-product-detail">
         <ListSection header="商品基础信息">
           <ListRow label="标题" extra={<PreWrapText>{product.title}</PreWrapText>} />
           <ListRow label="售价" extra={formatPrice(product.base_price)} />

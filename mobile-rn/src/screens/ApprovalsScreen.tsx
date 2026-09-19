@@ -35,6 +35,8 @@ const PAGE_SIZE = 10;
 export default function ApprovalsScreen({ onOpenDetail }: { onOpenDetail: (approvalId: string) => void }) {
   const role = useAuthStore((state) => state.user?.role);
   const [tab, setTab] = useState<Tab>("pending");
+  /** 受控下拉刷新（只反映"用户下拉"；后台 refetch 不该弹出指示器 —— 见 ProductsScreen 同处注释）。 */
+  const [refreshing, setRefreshing] = useState(false);
 
   const list = useInfiniteQuery({
     queryKey: ["approvals", tab],
@@ -50,6 +52,16 @@ export default function ApprovalsScreen({ onOpenDetail }: { onOpenDetail: (appro
 
   /** 列表里"卡住"的信号：已定案但商品仍停在待审批（引擎很可能没收到结论） */
   const looksStuck = (row: Approval) => row.status !== "pending" && row.product_status === "waiting_approval";
+
+  /** 用户下拉刷新（受控 refreshing：结束后必须复位，否则指示器永远转）。 */
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await list.refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const renderItem = (row: Approval) => {
     const reason = row.snapshot_summary?.reason ?? undefined;
@@ -122,12 +134,15 @@ export default function ApprovalsScreen({ onOpenDetail }: { onOpenDetail: (appro
       ) : list.isError ? (
         <QueryError what="审批列表加载" error={list.error} onRetry={() => void list.refetch()} />
       ) : (
+        // 同 ProductsScreen：Android 上 FlatList 的 `removeClippedSubviews` 默认为 true，
+        // 数据变短后会残留空占位/下方不重排 —— 审批列表同样显式关掉（每页 ≤10 张卡）。
         <FlatList
           data={items}
           keyExtractor={(row) => row.id}
           renderItem={({ item }) => renderItem(item)}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={list.isRefetching} onRefresh={() => void list.refetch()} />}
+          removeClippedSubviews={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
           onEndReachedThreshold={0.4}
           onEndReached={() => {
             if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();

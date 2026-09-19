@@ -131,4 +131,21 @@ describe("商品详情（RN）", () => {
     // 转人工期间不允许再触发生成（与后端 409 同口径）
     expect(view.getByTestId("pa-generate-submit").props.accessibilityState.disabled).toBe(true);
   });
+
+  it("流式正文区与外层页面都显式打开嵌套滚动，未溢出时不吃手势（2026-09 真机：滑正文却整页滚走）", async () => {
+    const view = await renderScreen();
+    await waitFor(() => expect(view.getByTestId("pa-generate-submit")).toBeTruthy());
+
+    // 打开实时流（面板挂进详情页的外层 ScrollView 里）
+    await fireEvent.press(view.getByTestId("pa-detail-more"));
+    await fireEvent.press(view.getByText("连接实时流"));
+
+    const box = await view.findByTestId("pa-stream-box");
+    // ① 内层显式打开嵌套滚动：普通 ScrollView 不写就走平台默认，Android 上内层拿不到手势
+    expect(box.props.nestedScrollEnabled).toBe(true);
+    // ② 测试环境没有真实布局 → onContentSizeChange 不触发 → 视为未溢出 → 关掉滚动（不白吃一次滑动）
+    expect(box.props.scrollEnabled).toBe(false);
+    // ③ 外层页面同样要显式打开，否则 Android 父层会抢掉内层手势
+    expect(view.getByTestId("pa-product-detail").props.nestedScrollEnabled).toBe(true);
+  });
 });

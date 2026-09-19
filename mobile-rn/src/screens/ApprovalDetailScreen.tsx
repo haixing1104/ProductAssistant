@@ -25,7 +25,7 @@ import Tag from "../ui/Tag";
 import { Dialog, Toast } from "../ui/feedback";
 import { approvalsApi } from "@pa/core/api";
 import { reasonMeta, scoreColor, snapshotBlocks, snapshotText, snapshotViolations } from "@pa/core/services/contentSnapshot";
-import { apiErrorMessage } from "@pa/core/services/errors";
+import { apiErrorMessage, isTransientGatewayFailure } from "@pa/core/services/errors";
 import { approvalStatusLabel, productStatusLabel } from "@pa/core/services/productMeta";
 import { formatTime, toTagColor } from "@pa/core/services/mobileFormat";
 import { isAdmin, useAuthStore } from "@pa/core/store/authStore";
@@ -72,6 +72,17 @@ export default function ApprovalDetailScreen({ approvalId, ticket, onBack }: Pro
       input.approve
         ? approvalsApi.approve(approvalId, input.feedback)
         : approvalsApi.reject(approvalId, input.feedback),
+    /**
+     * 只对「**根本没到后端**」的失败重试一次（网络错误 / 非信封 5xx）。
+     *
+     * 为什么敢重试：定案是 CAS（`approval_service.decide`）—— 重复定案只会得到
+     * 409「已被他人定案」，**不会重复上架**、也不会重复投递。
+     * 为什么必须重试：2026-09 真机实测走隧道时偶发边缘 503（后端当日 0 个 5xx、
+     * 请求在后端日志里完全不存在），用户被迫手动再点一次 —— 重试让它自己收敛。
+     * 4xx（含 409/403/422）一律不重试：那是**后端已经给出结论**的失败。
+     */
+    retry: (failureCount, error) => failureCount < 1 && isTransientGatewayFailure(error),
+    retryDelay: 800,
     onSuccess: (result, variables) => {
       if (result.resume_enqueued) {
         Toast.show({
