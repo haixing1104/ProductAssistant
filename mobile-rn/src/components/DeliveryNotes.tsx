@@ -1,6 +1,9 @@
 // 通知投递状态 —— 与 H5 的 `components/DeliveryNotes.tsx` 同口径。
 //
-// 语义全部复用共享层 `@pa/core/services/notificationStatus`（渠道名 / 状态色 / 失败判定）。
+// 语义全部复用共享层 `@pa/core/services/notificationStatus`（渠道名 / 状态色 / 失败判定 /
+// **当前有效错误 `currentError`**）。失败原因**必须**经 `currentError` 取：历史行里出现过
+// 「已送达但 payload 仍残留 `last_error`」，直接渲染 `note.error` 会把已经自愈的抖动
+// 说成投递失败（2026-09 实测事故）。次数文案统一由 `statusMeta` 出，组件不再自己拼。
 // **手机差异（照抄桌面会错）**: 桌面用 `Tooltip` 悬浮看失败原因，而手机没有 hover ——
 // 这里改成"点按 Tag 展开详情"（展开后逐渠道列出重试次数与失败原因，`dlq` 是终态要点明）。
 import { useState } from "react";
@@ -12,6 +15,7 @@ import { colors, font, space } from "../ui/theme";
 import { toTagColor } from "@pa/core/services/mobileFormat";
 import {
   channelLabel,
+  currentError,
   hasDeliveryFailure,
   notificationsSummary,
   statusMeta,
@@ -37,16 +41,17 @@ export default function DeliveryNotes({ notes, compact = false }: Props) {
     <View style={styles.detail}>
       {notes.map((note, index) => {
         const meta = statusMeta(note);
+        const err = currentError(note);
         return (
           <View key={`${note.channel}-${index}`} style={styles.detailRow}>
+            {/* 重试次数由 statusMeta 的文案表达，这里不再拼后缀（否则会出现「第 1 次）（第 1 次）」） */}
             <Tag color={toTagColor(meta.color)}>
               {channelLabel(note.channel)} · {meta.label}
-              {note.retry_count ? `（第 ${note.retry_count} 次）` : ""}
             </Tag>
             {note.next_retry_at ? (
               <PreWrapText style={styles.dim}>下次重试：{note.next_retry_at}</PreWrapText>
             ) : null}
-            {note.error ? <PreWrapText style={styles.error}>原因：{note.error}</PreWrapText> : null}
+            {err ? <PreWrapText style={styles.error}>原因：{err}</PreWrapText> : null}
           </View>
         );
       })}

@@ -5,6 +5,7 @@ import { reasonMeta, snapshotBlocks, snapshotText } from "../services/contentSna
 import { traceRows, violationsSummary, evaluatorLabel } from "../services/evaluationTrace";
 import {
   channelLabel,
+  currentError,
   hasDeliveryFailure,
   notificationsSummary,
   statusMeta,
@@ -77,11 +78,32 @@ describe("notificationStatus", () => {
     ...over,
   });
 
-  it("状态文案：sent/dlq/pending 与重试中", () => {
+  it("状态文案：sent/dlq/pending 与重试中（含「重试后才送达」）", () => {
     expect(statusMeta(note({ status: "sent" })).label).toBe("已发送");
-    expect(statusMeta(note({ status: "dlq", retry_count: 3 })).label).toBe("投递失败");
+    // 首投失败 + 重试送达：必须说出来，否则「抖动过」与「一次成功」看起来一样
+    expect(statusMeta(note({ status: "sent", retry_count: 1 })).label).toBe("已发送（重试 1 次后成功）");
+    expect(statusMeta(note({ status: "dlq", retry_count: 3 })).label).toBe("投递失败（已尝试 3 次）");
     expect(statusMeta(note({ retry_count: 2 })).label).toContain("第 2 次");
     expect(statusMeta(note({})).label).toBe("待投递");
+  });
+
+  it("currentError：已送达的行不许再报错（2026-09 事故：sent + 残留 last_error）", () => {
+    // 事故形态：钉钉其实在 30s 后的重试里收到了，payload 里的 last_error 还挂着 ——
+    // 界面若照渲染，运维看到的就是「投递失败」的红字，而消息早就到了。
+    const flapped = note({
+      status: "sent",
+      retry_count: 1,
+      error: "NotificationSendError: 钉钉投递网络异常：ConnectError('[Errno 101] …')",
+    });
+    expect(currentError(flapped)).toBeNull();
+    expect(currentError(note({ status: "sent" }))).toBeNull();
+
+    // 未送达的行照常透出原因（审批人/运维据此判断是「配错 webhook」还是「网络抖」）
+    expect(currentError(note({ status: "dlq", retry_count: 3, error: "webhook 404" }))).toBe("webhook 404");
+    expect(currentError(note({ status: "pending", retry_count: 1, error: "网络抖动" }))).toBe("网络抖动");
+    expect(currentError(note({ status: "pending" }))).toBeNull();
+    // 未知状态宁可显示原因，不静默吞掉
+    expect(currentError(note({ status: "weird", error: "?" }))).toBe("?");
   });
 
   it("渠道中文名与摘要文案", () => {

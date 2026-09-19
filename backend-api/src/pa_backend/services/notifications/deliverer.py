@@ -13,10 +13,15 @@
     · **没有 sender 的渠道直接 DLQ**：``live`` 模式下「有渠道名但缺凭据」属配置错误，
       无脑重试只会刷屏；判 DLQ 并在日志点明原因，让运维一眼看到。
 
-可观测性（失败原因为什么落库）:
+可观测性（失败原因为什么落库，以及什么时候必须清掉）:
     失败时把原因写进 ``payload['last_error']``（诊断字段）。只打日志是不够的：
     审批中心要能直接回答「通知为什么没到」——「群机器人 webhook 填错」和「网络抖动」
     的处置方式完全不同，而这两者在界面上通常长得一样（都是「没发出去」）。
+    送达成功时**必须清掉它**：该字段的语义是「当前故障」而不是「历史」——
+    留着会让界面把已经自愈的抖动当成当前失败（2026-09 实测：``sent`` + 残留 ``last_error``
+    → H5 详情持续显示红字「NotificationSendError: …」，而钉钉其实早在 30s 后的重试里收到了）。
+    「曾经失败过」由 ``retry_count > 0`` 表达（前端据此显示「已发送（重试 N 次后成功）」），
+    所以清理并不损失可观测性 —— 想统计抖动率请用 ``retry_count``，不要用 ``last_error``。
 """
 
 from __future__ import annotations
@@ -151,6 +156,12 @@ class OutboxDeliverer:
         row.status = "sent"
         row.provider_msg_id = provider_msg_id
         row.next_retry_at = None
+        # 送达即清掉「当前故障」诊断：``last_error`` 的语义是"现在为什么没到"，不是历史记录。
+        # 留着会让界面把已经自愈的抖动当成当前失败（2026-09 实测事故，见模块 docstring）。
+        # 「曾失败过」由 ``retry_count`` 保留，前端据此显示「已发送（重试 N 次后成功）」。
+        # 重新赋值而非原地删键：JSONB 原地改不会被持久化（与上面的失败分支同一个坑）。
+        if row.payload and "last_error" in row.payload:
+            row.payload = {key: value for key, value in row.payload.items() if key != "last_error"}
 
     async def run(self, stop: asyncio.Event, *, interval: float = POLL_INTERVAL_SECONDS) -> None:
         """常驻循环（lifespan 启动）。

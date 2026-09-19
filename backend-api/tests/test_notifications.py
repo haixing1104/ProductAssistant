@@ -167,6 +167,72 @@ async def test_retry_then_dlq_after_max_attempts(
     assert await deliverer.process_due_once(now=base + timedelta(seconds=9999)) == 0
 
 
+class _FlakyOnceSender:
+    """第 1 次抛错、之后成功的 sender（模拟「网络抖一下又自愈」——2026-09 实测形态）。"""
+
+    def __init__(self) -> None:
+        """初始化（记录尝试次数便于断言）。"""
+        self.calls = 0
+
+    def send(self, payload: dict) -> str | None:  # noqa: ARG002 参数协议需要
+        """首次抛 ``NotificationSendError``，其后返回回执号。"""
+        self.calls += 1
+        if self.calls == 1:
+            raise NotificationSendError(
+                "模拟网络抖动：ConnectError(\"[Errno 101] Network is unreachable\")"
+            )
+        return "flaky-ok"
+
+
+async def test_recovered_delivery_clears_last_error(
+    app, settings, backend_dsn: str, seeded_org: SeededOrg
+):
+    """首投失败、重试成功的行：``last_error`` 必须被清掉，只留 ``retry_count > 0``。
+
+    为什么这条断言重要: ``last_error`` 是「当前故障」诊断，送达后还挂着会让**界面永久说错话**
+    （2026-09 实测事故：H5 详情显示红字「NotificationSendError: 钉钉投递网络异常…」，
+    而钉钉其实早在 30s 后的重试里收到了）。所以这里既锁「清理」，也锁「曾失败过仍可观测」。
+    """
+    thread_id = seed_job(backend_dsn, org_id=seeded_org.org_id, product_id=seeded_org.product_id)
+    await WorkflowResultConsumer(
+        app.state.session_factory, settings=settings, notify_channels=("dingtalk",)
+    ).process_payload(
+        result_payload(
+            thread_id=thread_id,
+            product_id=seeded_org.product_id,
+            org_id=seeded_org.org_id,
+            result="awaiting_human",
+            content_snapshot=SNAPSHOT,
+        )
+    )
+    sender = _FlakyOnceSender()
+    deliverer = OutboxDeliverer(
+        app.state.session_factory,
+        settings=settings,
+        senders={"dingtalk": sender},
+        max_attempts=3,
+        backoff_seconds=30,
+    )
+    base = datetime.now(timezone.utc)
+
+    # 第 1 次：失败 → 原因落库（诊断信息不能丢），行回到 pending 等退避
+    assert await deliverer.process_due_once(now=base) == 1
+    status, retry_count, _c, payload, _m = _outbox_rows(backend_dsn, seeded_org.org_id)[0]
+    assert (status, retry_count) == ("pending", 1)
+    assert "Network is unreachable" in str(payload.get("last_error"))
+    assert payload.get("approval_id"), "清理不得误伤载荷其它字段"
+
+    # 第 2 次（过退避）：成功 → last_error 清掉、retry_count 保留、回执号落库
+    assert await deliverer.process_due_once(now=base + timedelta(seconds=31)) == 1
+    status, retry_count, _c, payload, provider_msg_id = _outbox_rows(
+        backend_dsn, seeded_org.org_id
+    )[0]
+    assert (status, retry_count) == ("sent", 1)
+    assert provider_msg_id == "flaky-ok"
+    assert "last_error" not in payload, f"送达后仍残留当前故障诊断：{payload}"
+    assert payload.get("approval_id"), "清理只应删 last_error"
+
+
 async def test_channel_without_sender_goes_dlq(app, settings, backend_dsn: str, seeded_org: SeededOrg):
     """有渠道名但没有 sender（live 模式缺凭据）：直接 DLQ 并告警，而不是无脑重试。"""
     thread_id = seed_job(backend_dsn, org_id=seeded_org.org_id, product_id=seeded_org.product_id)
