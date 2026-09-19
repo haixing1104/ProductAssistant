@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 import App from "../App";
 import { projects } from "../data/projects";
@@ -35,17 +35,103 @@ describe("作品集首页", () => {
     expect(screen.queryByRole("link", { name: /进入系统/ })).toBeNull();
   });
 
-  it("四端演示 Tab 齐全，默认播/显示第一个端", () => {
+});
+
+// 演示区：端 Tab（3 个）+ 端内分段卡片 + 舞台。
+// 这一组用例把「每端多段」这个需求钉死在页面上，而不只是钉在数据里。
+describe("三端演示（端 Tab + 分段 + 舞台）", () => {
+  const firstProject = projects[0];
+  const webDemo = firstProject.demos[0];
+  const rnDemo = firstProject.demos[firstProject.demos.length - 1];
+
+  const platformTabs = () => within(screen.getByRole("tablist", { name: /多端演示/ })).getAllByRole("tab");
+  const clipTabs = () => within(screen.getByRole("tablist", { name: /演示分段/ })).getAllByRole("tab");
+  const stage = () => screen.getByRole("tabpanel");
+
+  it("端 Tab 齐全（PC Web / Mobile H5 / Mobile Native），默认显示第一个端", () => {
     render(<App />);
 
-    const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(firstProject.demos.length);
-    expect(tabs.map((tab) => tab.textContent)).toEqual(firstProject.demos.map((demo) => demo.label));
+    // 需求钉死：恰好三个端、标签就是这三个 —— 故意不复用数据，
+    // 谁再加/减一个端（或改标签）都该在这里被发现，而不是悄悄上线。
+    expect(platformTabs().map((tab) => tab.textContent)).toEqual([
+      "PC Web",
+      "Mobile H5",
+      "Mobile Native (Android & iOS)",
+    ]);
+    // 再与数据对齐一次：字面量与 `data/projects.ts` 任一侧改了、另一侧没跟上都会红。
+    expect(platformTabs().map((tab) => tab.textContent)).toEqual(firstProject.demos.map((demo) => demo.label));
 
-    const [firstTab] = tabs;
+    const [firstTab] = platformTabs();
     expect(firstTab).toHaveAttribute("aria-selected", "true");
-    // 默认端还没有资产 → 渲染占位说明（文案来自数据里的 note）
-    expect(screen.getByText(firstProject.demos[0].note!)).toBeInTheDocument();
+  });
+
+  it("默认端渲染出它的全部分段卡片：标题 + 时长徽标，默认选中第一段", () => {
+    render(<App />);
+
+    // 段数 = 数据里的段数（PC Web 4 段）；时长必须显示 —— GIF 不能暂停，访客先知道要看多久
+    expect(clipTabs()).toHaveLength(webDemo.clips.length);
+    expect(clipTabs().map((tab) => tab.textContent)).toEqual(
+      webDemo.clips.map((clip) => `${clip.title}${clip.duration}`),
+    );
+    expect(clipTabs()[0]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("舞台上只挂当前那一段：未选中的段零请求（不是渲染出来再隐藏）", () => {
+    render(<App />);
+
+    const images = within(stage()).getAllByRole("img");
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute("src")).toContain(webDemo.clips[0].gif!);
+    expect(within(stage()).queryByRole("video")).toBeNull();
+  });
+
+  it("点分段卡片换舞台内容，卡片选中态跟着走", () => {
+    render(<App />);
+
+    const second = clipTabs()[1];
+    fireEvent.click(second);
+
+    expect(second).toHaveAttribute("aria-selected", "true");
+    expect(clipTabs()[0]).toHaveAttribute("aria-selected", "false");
+    expect(within(stage()).getByRole("img").getAttribute("src")).toContain(webDemo.clips[1].gif!);
+  });
+
+  it("←/→ 也能切段（键盘可达），焦点跟着移到新选中的卡片", () => {
+    render(<App />);
+
+    fireEvent.keyDown(screen.getByRole("tablist", { name: /演示分段/ }), { key: "ArrowRight" });
+    expect(clipTabs()[1]).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(clipTabs()[1]);
+
+    // 到头回绕：再按 ← 回到前一段
+    fireEvent.keyDown(screen.getByRole("tablist", { name: /演示分段/ }), { key: "ArrowLeft" });
+    expect(clipTabs()[0]).toHaveAttribute("aria-selected", "true");
+    expect(document.activeElement).toBe(clipTabs()[0]);
+  });
+
+  it("只有一段的端不渲染分段卡片（不给「只有一个选项的选择器」）", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Mobile Native (Android & iOS)" }));
+
+    expect(rnDemo.clips).toHaveLength(1);
+    expect(screen.queryByRole("tablist", { name: /演示分段/ })).toBeNull();
+    expect(within(stage()).getByRole("img").getAttribute("src")).toContain(rnDemo.clips[0].gif!);
+  });
+
+  it("换端后段选择重置为第一段（不同端出现同名段 key 也不会串台）", () => {
+    render(<App />);
+
+    fireEvent.click(clipTabs()[1]);
+    expect(within(stage()).getByRole("img").getAttribute("src")).toContain(webDemo.clips[1].gif!);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Mobile H5" }));
+    const h5Demo = firstProject.demos[1];
+    expect(within(stage()).getByRole("img").getAttribute("src")).toContain(h5Demo.clips[0].gif!);
+
+    // 切回 Web 端：回到第一段，而不是"记住"刚才的第二段
+    fireEvent.click(screen.getByRole("tab", { name: "PC Web" }));
+    expect(within(stage()).getByRole("img").getAttribute("src")).toContain(webDemo.clips[0].gif!);
   });
 });
 

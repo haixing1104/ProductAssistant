@@ -6,29 +6,61 @@
 // **「声明了视频/首帧图就必须真实存在」** —— 文件名写错会在 `npm test` 当场变红，
 // 而不是上线后变成一个白块（这类错在静态页上没人会及时发现）。
 
-/** 演示的四个端。顺序即页面上的 Tab 顺序。 */
-export type Platform = "web" | "h5" | "rn-android" | "rn-ios";
+/**
+ * 演示的三个端（Tab 顺序 = `data/projects.ts` 里 demos 的顺序）。
+ *
+ * 为什么原生端只有一条 `rn` 而不是 Android / iOS 各一条：原生端是**一套代码两端**，
+ * 拆成两个 Tab 只会让 iOS 那条长期停在占位态（录制要 macOS / Xcode 或 iPhone 真机），
+ * 访客看到的是"两个长得一样的端、其中一个永远没内容"。合并后一个 Tab 覆盖两端，
+ * 素材按 `demos/<slug>/rn.<ext>` 放一段即可。
+ */
+export type Platform = "web" | "h5" | "rn";
 
 /**
- * 一个端的演示资产。
+ * 一个端里的一段演示（一个动图或一段视频）。
+ *
+ * 为什么是「每端多段」而不是「一端一段」：**GIF 不能暂停、不能拖进度**，把完整流程压成一段，
+ * 访客实际只会看到开头几秒就划走了。拆段后每段 20–35s、卡片上标出时长，访客按需点开，
+ * 每次只下载当前这一段的字节（未选中的段零请求）。
  *
  * 三种状态（页面按「有 video → 有 gif → 只有 note」的优先级降级渲染）：
  *   1. 录好了        : `video`（推荐 mp4/webm）+ `poster`（首帧图，防布局跳动）
  *   2. 只有动图      : `gif`（体积是同内容 mp4 的 5–10 倍，非必要不用）
- *   3. 还没录        : 只写 `note`，页面渲染成一块**设计好的占位卡**（看起来是刻意留白，不是坏图）
+ *   3. 还没录        : 不写这一段，整端只留 `DemoAsset.note` → 渲染一块设计好的占位卡
  *
- * 路径相对 `public/`（如 `demos/pa/web.mp4`），用 `lib/asset.ts` 的 `demoPath()` 生成，
- * 避免手写字符串拼错。
+ * 路径相对 `public/`（如 `demos/pa/web/01-list.gif`），用 `lib/asset.ts` 的 `demoPath()` 生成，
+ * 避免手写字符串拼错（拼错会被 `__tests__/projects.test.ts` 当场指出）。
  */
-export type DemoAsset = {
-  platform: Platform;
-  /** Tab 上的名字，如「Web 工作台」。 */
-  label: string;
-  /** 还没录时的说明（录好后可以留着当图注）。 */
+export type DemoClip = {
+  /** 文件名主干（不含扩展名）：`demos/<slug>/<platform>/<key>.<ext>`。同时是段级 Tab 的 id 后缀。 */
+  key: string;
+  /** 分段卡片上的短标题，如「商品列表」。 */
+  title: string;
+  /** 时长徽标，如 `"25s"`。GIF 没有进度条，先告诉访客这段要看多久。 */
+  duration: string;
+  /** 这一段演示了什么（显示在舞台下方的一行图注）。 */
   note?: string;
   poster?: string;
   video?: string;
   gif?: string;
+};
+
+/**
+ * 一个端的演示资产：**若干段** + 舞台比例。
+ *
+ * `clips` 为空数组 = 这一端还没录，页面用 `note` 渲染占位卡。
+ * `aspect` 直接写 CSS 值（如 `"1882 / 912"`），与素材真实尺寸一致 —— 外框按素材比例走，
+ * 既不裁掉界面文字，也不留黑边（16:9 硬框会把竖屏手机截图压成"矮胖"）。
+ */
+export type DemoAsset = {
+  platform: Platform;
+  /** Tab 上的名字，如「PC Web」/「Mobile Native (Android & iOS)」。 */
+  label: string;
+  /** 舞台外框比例（CSS `aspect-ratio` 值），与素材真实像素尺寸一致。 */
+  aspect: string;
+  /** 整端还没录时的说明（`clips` 为空时显示）。 */
+  note?: string;
+  clips: DemoClip[];
 };
 
 export type ProjectLinks = {

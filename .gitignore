@@ -4,6 +4,12 @@ infra/.env
 # --- 数据库备份（不入库）---
 infra/backups/
 
+# --- 演示素材母带（原始录屏 / 导出 mp4，几百 MB 级且可再生，不入库）---
+# 作品集页面用的是压缩后的产物：portfolio/public/demos/<slug>/<platform>/<key>.<ext>
+# 母带留在本机（或对象存储）即可；压缩命令见 portfolio/public/demos/pa/README.md
+demo-index/
+demo-index-mp4/
+
 # --- Python ---
 __pycache__/
 *.py[cod]

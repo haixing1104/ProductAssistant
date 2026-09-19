@@ -77,8 +77,15 @@
     @apply rounded-full bg-ink-50 px-3 py-1 text-xs text-ink-700 dark:bg-white/5 dark:text-ink-100;
   }
 
-  /* 演示区外框：固定 16:9，避免视频加载前后页面跳动 */
+  /* 演示区外框：比例由数据里的 `aspect` 决定（= 素材真实尺寸），避免加载前后页面跳动 */
   .demo-frame {
-    @apply aspect-video w-full overflow-hidden rounded-card border border-ink-100 bg-ink-50 dark:border-white/10 dark:bg-white/5;
+    @apply w-full overflow-hidden rounded-card border border-ink-100 bg-ink-50 dark:border-white/10 dark:bg-white/5;
+  }
+
+  /* 竖屏素材（H5 / 原生 App 的手机截图）：收窄居中。
+     不做这一步的话，500px 宽的手机截图会被拉到整个卡片宽（900px+）——文字糊、比例假。
+     `max-w-xs`(320px) 而不是更宽：面板宽度贴着素材实际像素走，放大的部分只会更糊。 */
+  .demo-frame--phone {
+    @apply mx-auto max-w-xs;
   }
 }

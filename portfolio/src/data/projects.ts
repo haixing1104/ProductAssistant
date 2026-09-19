@@ -1,14 +1,19 @@
+import { demoPath } from "../lib/asset";
 import type { Project } from "../types";
 
 // =============================================================================
 // 作品合集（**唯一内容事实源**）
 //
 // 加一个新作品：复制下面一个对象 → 改 slug/name/tagline/… → 建 `public/demos/<slug>/` 目录。
-// 页面（卡片、四端演示切换、进入系统按钮）全部由这份数据驱动，不需要改任何组件。
+// 页面（卡片、三端演示切换、进入系统按钮）全部由这份数据驱动，不需要改任何组件。
 //
-// 每一条都会被 `__tests__/projects.test.ts` 校验，其中两条最值得留意：
-//   1. **声明了 video/gif/poster 就必须在 public/ 下真实存在**（文件名写错 = 测试红）；
-//   2. 某个端没有 video/gif 时必须给 `note`（否则页面上是一块空白，而不是设计好的占位）。
+// 每一条都会被 `__tests__/projects.test.ts` 校验，其中三条最值得留意：
+//   1. **声明了 gif/video/poster 就必须在 public/ 下真实存在**（文件名写错 = 测试红）；
+//   2. 每个端都要有 `clips`（段）与 `aspect`（= 素材真实尺寸，决定舞台外框比例）；
+//   3. 某个端没有素材时，`clips` 留空数组并给 `note`（否则页面上是一块空白，而不是设计好的占位）。
+//
+// 段的粒度口径：**一段 = 一个动作**（建品 / 生成 / 审批 / 拦截），20–35s。
+// 动图不能暂停也不能拖进度，把 2 分钟的完整流程塞成一段，访客只会看到开头几秒。
 // =============================================================================
 
 export const projects: Project[] = [
@@ -51,39 +56,93 @@ export const projects: Project[] = [
     demos: [
       {
         platform: "web",
-        label: "Web 工作台",
-        note: "录制中：商品列表 → 详情页 SSE 打字机 → 审批中心",
+        label: "PC Web",
+        // 素材真实尺寸 1882×912（录制窗口），外框按这个比例走，不裁不留黑边
+        aspect: "1882 / 912",
+        clips: [
+          {
+            key: "01-list",
+            title: "商品列表与建品",
+            duration: "25s",
+            note: "工作台入口：多租户商品列表、状态筛选与新建商品（字段校验 + 草稿态）",
+            gif: demoPath("pa", "web", "01-list", "gif"),
+          },
+          {
+            key: "02-generate",
+            title: "AI 生成与人工审批驳回",
+            duration: "153s",
+            note: "SSE 打字机逐段生成文案与配图，提交后进入审批中心；审批人带意见驳回，驳回意见回灌下一次生成",
+            gif: demoPath("pa", "web", "02-generate", "gif"),
+          },
+          {
+            key: "03-revise",
+            title: "按驳回意见改写",
+            duration: "136s",
+            note: "AI 读取结构化审批意见重写文案，合规分从 62 提到 95，再次提交后自动通过",
+            gif: demoPath("pa", "web", "03-revise", "gif"),
+          },
+          {
+            key: "04-blocked",
+            title: "违规词拦截",
+            duration: "39s",
+            note: "命中租户自定义违规词库时的拦截与提示：不改不能提交，拦截原因可追溯到词条",
+            gif: demoPath("pa", "web", "04-blocked", "gif"),
+          },
+        ],
       },
       {
         platform: "h5",
-        label: "移动端 H5",
-        note: "录制中：审批列表 → 通知深链 → 批准 / 驳回",
+        label: "Mobile H5",
+        // 素材真实尺寸 493×854（iPhone 视口）→ 竖屏，舞台收窄居中
+        aspect: "493 / 854",
+        clips: [
+          {
+            key: "01-generate",
+            title: "AI 生成",
+            duration: "87s",
+            note: "移动端同一份契约层：SSE 打字机、阶段事件与 AI 思考轨迹在窄屏下的排版",
+            gif: demoPath("pa", "h5", "01-generate", "gif"),
+          },
+          {
+            key: "02-approve",
+            title: "人工审批",
+            duration: "30s",
+            note: "审批列表 → 详情 → 批准 / 驳回（含审批意见输入），与桌面端共用同一套审批 CAS",
+            gif: demoPath("pa", "h5", "02-approve", "gif"),
+          },
+        ],
       },
       {
-        platform: "rn-android",
-        label: "RN · Android",
-        note: "录制中：原生 App（Expo dev build / 真机）",
-      },
-      {
-        platform: "rn-ios",
-        label: "RN · iOS",
-        note: "iOS 端需 macOS / Xcode 或真机录制，暂以 Android 版演示",
+        // Android 与 iOS 合成一个 Tab：原生端一套代码两端，素材覆盖两者。
+        // iOS 的录制条件（macOS / Xcode 或 iPhone 真机）写在 note 里，不单独占一个永远空的 Tab。
+        platform: "rn",
+        label: "Mobile Native (Android & iOS)",
+        // 素材真实尺寸 240×520（Android 真机录屏重编码后）→ 竖屏
+        aspect: "240 / 520",
+        clips: [
+          {
+            key: "01-overview",
+            title: "原生 App 全链路",
+            duration: "30s",
+            note: "Android 真机（Expo dev build）：建品 → AI 流式生成 → 合规评分 95 → 自动提审 → 审批中心待办",
+            gif: demoPath("pa", "rn", "01-overview", "gif"),
+          },
+        ],
+        note: "iOS 端需 macOS / Xcode 或 iPhone 真机录制；本机为 Linux，故这一段为 Android 真机素材（两端共用一套代码）",
       },
     ],
   },
 ];
 
-// 录好一段演示后的写法（资产命名与压缩命令见 `public/demos/pa/README.md`）：
+// ── 录好一段演示后的写法 ────────────────────────────────────────────────────
 //
-//   import { demoPath } from "../lib/asset";   // ← 记得在文件顶部补这行
-//   …
-//   {
-//     platform: "web",
-//     label: "Web 工作台",
-//     video: demoPath("pa", "web", "mp4"),
-//     poster: demoPath("pa", "web", "webp"),
-//     note: "商品列表 → 详情页 SSE 打字机 → 审批中心",
-//   }
+// 1) 素材按 `demos/<slug>/<platform>/<key>.<ext>` 命名（`demoPath()` 生成，别手写）：
+//      public/demos/pa/web/01-list.gif
+// 2) 在对应端的 `clips` 里加一段：key / title / duration / note / gif(或 video + poster)。
+// 3) 段的 key 用 `01-`、`02-` 前缀：分段卡片按数组顺序渲染，文件名也就能一眼看出先后。
 //
-// `demoPath` 保证命名统一；写错名字（或忘了放文件）会在 `npm test` 里被当场指出 ——
-// 这条「声明即校验」的规则就是为了挡住「上线后才发现是个白块」。
+// 换成 mp4（体积只有 GIF 的 1/5–1/10，还能暂停）时只改这两行，组件不用动：
+//
+//   video: demoPath("pa", "web", "01-list", "mp4"),
+//   poster: demoPath("pa", "web", "01-list", "webp"),
+
