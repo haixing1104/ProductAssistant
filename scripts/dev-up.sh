@@ -57,6 +57,15 @@ AI_DIR="${ROOT_DIR}/ai-engine"
 FRONTEND_DIR="${ROOT_DIR}/frontend"
 MOBILE_DIR="${ROOT_DIR}/mobile-h5"
 
+# 后端监听地址（PA_BACKEND_HOST）：
+#   默认 127.0.0.1 = 只监听回环（**安全默认，不要随手改**）—— 桌面端与 H5 的 dev 都走同源代理
+#   （vite `/api` → 127.0.0.1:8000，请求由开发机发出），回环就够，且不会把开发机上的真实数据
+#   暴露给同一局域网的其它设备。
+#   但移动端原生 App（mobile-rn）**没有任何代理**：请求从手机直接发出，所以真机联调必须让后端
+#   暴露到局域网，否则表现是「手机能连上 Metro、一点登录就报网络异常」（2026-09 实测踩过）。
+#   联调写法：PA_BACKEND_HOST=0.0.0.0 ./scripts/dev-up.sh（联调完请恢复默认）。
+BACKEND_HOST="${PA_BACKEND_HOST:-127.0.0.1}"
+
 # ---------------- 选项 ----------------
 DETACH=0
 WITH_AI=1
@@ -78,9 +87,16 @@ usage() {
   --strict-env  env-check.sh 出现 WARN 也阻断启动
   -h, --help    显示本帮助
 
+环境变量:
+  PA_BACKEND_HOST=<ip>  后端监听地址（默认 127.0.0.1，只监听回环）。移动端原生 App（mobile-rn）
+                        真机联调必须设 0.0.0.0 —— RN 没有代理，请求从设备直接发出；联调完请恢复默认。
+
 日志: ${TMPDIR:-/tmp}/padev/{backend,ai-engine,frontend,mobile}.log（可用 PAD_LOG_DIR 覆盖）
       每次启动会把上一轮日志滚成 .log.1（保留 PAD_LOG_KEEP 份，默认 3）—— 不再清空历史现场
-移动端: http://localhost:5174（真机联调：http://<本机局域网IP>:5174 —— 走 vite 代理，无需 CORS）
+移动端: H5  http://localhost:5174（真机：http://<本机局域网IP>:5174 —— 走 vite 代理，无需 CORS）
+        RN  mobile-rn/.env 写 EXPO_PUBLIC_API_BASE_URL=http://<本机局域网IP>:8000
+            （原生端没有代理，必须绝对地址；且后端须以 PA_BACKEND_HOST=0.0.0.0 启动，
+              否则表现是「手机能连 Metro、一登录就网络异常」；改完 .env 必须 npx expo start -c）
 宣传页: 不由本脚本启动（零后端依赖）：./scripts/dev-landing.sh → http://localhost:5175
 停止: 前台 Ctrl-C；后台 ./scripts/dev-down.sh
 
@@ -134,6 +150,18 @@ http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$1" 2>/dev/nu
 port_busy() { ss -ltn "( sport = :$1 )" 2>/dev/null | grep -q LISTEN; }
 port_owner() { ss -ltnp "( sport = :$1 )" 2>/dev/null | sed -n '2p' | sed -E 's/.*users:\(\("([^"]+)".*/\1/'; }
 container_health() { docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null || echo none; }
+
+# lan_ip：本机在局域网里的地址（只用于打印「真机联调该填哪个地址」，不参与任何判定）。
+#   · 首选 `ip route get`：它给的是**默认路由实际使用的源地址** —— WSL2 镜像模式（.wslconfig 的
+#     networkingMode=mirrored）下直接得到宿主机 Wi-Fi IP，正是手机可达的那个地址；
+#     NAT 模式下得到的是 WSL 虚拟网段地址（手机本来就到不了，见 mobile-rn/README「WSL2 联调」）；
+#   · 回落 `hostname -I` 的第一个（多网卡/容器环境里不保证正确，仅兜底）。
+lan_ip() {
+  local ip=""
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)"
+  if [ -z "${ip}" ]; then ip="$(hostname -I 2>/dev/null | awk '{print $1}')"; fi
+  printf '%s' "${ip}"
+}
 
 # wait_until <说明> <超时秒> <探测命令...>：轮询探测，每 10s 打印一次已等待秒数（长步骤不像是卡死）
 wait_until() {
@@ -409,8 +437,11 @@ CURRENT_STEP="S2 启动三进程"
 step "S2 启动三进程"
 export PYTHONUNBUFFERED=1   # 关键：保证 Python 日志**逐行实时**（--reload 的子进程同样继承）
 
-BACKEND_ARGS=(pa_backend.main:app --app-dir src --host 127.0.0.1 --port "${BACKEND_PORT:-8000}")
+BACKEND_ARGS=(pa_backend.main:app --app-dir src --host "${BACKEND_HOST}" --port "${BACKEND_PORT:-8000}")
 [ "${RELOAD}" = "1" ] && BACKEND_ARGS+=(--reload)
+if [ "${BACKEND_HOST}" != "127.0.0.1" ]; then
+  warn "后端监听 ${BACKEND_HOST}（非回环）：同一局域网内任何设备都能访问 :8000（含真实数据）—— 联调完请恢复默认"
+fi
 
 start_service backend  "${BACKEND_DIR}"  "${COLOR_BACKEND}" \
   "${BACKEND_DIR}/.venv/bin/uvicorn" "${BACKEND_ARGS[@]}"
@@ -482,15 +513,29 @@ fi
 # ---------------------------------------------------------------------------
 CURRENT_STEP="S4 摘要"
 echo ""
+
+# 真机联调要用的两个地址（拿不到本机局域网 IP 时留空，下面按空值退化显示）
+LAN_IP="$(lan_ip)"
+LAN_API="http://${LAN_IP}:${BACKEND_PORT:-8000}"
+H5_HINT="http://<本机局域网IP>:5174"
+[ -n "${LAN_IP}" ] && H5_HINT="http://${LAN_IP}:5174"
 echo "=============================================================="
 echo " ProductAssistant 本地环境已就绪"
 echo "--------------------------------------------------------------"
 echo "  前端工作台 : http://localhost:5173      （首次需点「注册新企业」开租户）"
 if [ "${WITH_MOBILE}" = "1" ]; then
-echo "  移动端 H5  : http://localhost:5174      （真机：http://<本机局域网IP>:5174，走 vite 代理无需 CORS）"
+echo "  移动端 H5  : http://localhost:5174      （真机：${H5_HINT}，走 vite 代理无需 CORS）"
 fi
 echo "  作品集宣传页 : http://localhost:5175      （不在本脚本内：另开终端 ./scripts/dev-landing.sh）"
 echo "  后端 API   : http://localhost:${BACKEND_PORT:-8000}/healthz  ·  /readyz  ·  /docs"
+if [ -n "${LAN_IP}" ]; then
+  echo "  RN 真机联调 : mobile-rn/.env → EXPO_PUBLIC_API_BASE_URL=${LAN_API}"
+  if [ "${BACKEND_HOST}" = "127.0.0.1" ]; then
+    echo "                ⚠ 后端当前只监听 127.0.0.1（手机到不了）→ 请以 PA_BACKEND_HOST=0.0.0.0 重启"
+  else
+    echo "                自检：手机浏览器打开 ${LAN_API}/healthz；改完 .env 必须 npx expo start -c"
+  fi
+fi
 if [ "${WITH_AI}" = "1" ]; then
 echo "  AI 引擎    : worker 心跳见 /ops 页面（运维面板，仅 admin）"
 echo "  Milvus     : http://localhost:9091/healthz · MinIO 控制台 http://localhost:9001"

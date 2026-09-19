@@ -1020,6 +1020,7 @@ GET /api/v1/products/{id}/stream?ticket=…    ← SSE：回放 + 尾随（无�
 ```bash
 ./scripts/dev-up.sh          # 前台：四路日志实时滚动（[backend]/[ai-engine]/[frontend]/[mobile]），Ctrl-C 一键收盘
 ./scripts/dev-up.sh --detach # 后台：日志落盘 /tmp/padev/*.log，用 ./scripts/dev-logs.sh 跟进
+PA_BACKEND_HOST=0.0.0.0 ./scripts/dev-up.sh   # 真机联调：后端监听所有网卡（默认只监听回环 127.0.0.1）
 ./scripts/dev-down.sh        # 停四进程（容器保留）；--with-infra 连容器一起停（数据卷保留）
 ./scripts/dev-landing.sh     # 作品集宣传页（portfolio/，:5175，纯静态无后端依赖；Ctrl-C 停）
 ./scripts/test-frontend.sh   # 桌面端用例（自带超时与「以文件级 ✓ 判定」的收尾逻辑，见 frontend/README）

@@ -3,9 +3,10 @@
 // 这条最容易照抄 PP 写错：PP 优先读 `detail`，而 PA 的可读原因在 `message`；
 // 写错的表现是「所有业务错误都退化成状态码兜底文案」（如 SKU 冲突只显示「数据冲突」）。
 import axios from "axios";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { apiErrorMessage, csvRowErrors, retryAfterSeconds } from "../services/errors";
+import { apiErrorMessage, csvRowErrors, isTransientGatewayFailure, retryAfterSeconds } from "../services/errors";
+import { resetPlatform, setPlatform, type PaPlatform } from "../services/platform";
 
 /** 构造一个"像 axios 错误"的对象（含 response.data / response.headers）。 */
 function axiosError(status: number, body: unknown, headers: Record<string, string> = {}) {
@@ -69,5 +70,70 @@ describe("retryAfterSeconds", () => {
     expect(retryAfterSeconds(axiosError(429, {}, {}))).toBeNull();
     expect(retryAfterSeconds(axiosError(429, {}, { "retry-after": "not-a-number" }))).toBeNull();
     expect(retryAfterSeconds(new Error("x"))).toBeNull();
+  });
+});
+
+describe("网络类文案带目标基址（2026-09 真机「网络异常」排障口径）", () => {
+  afterEach(() => {
+    resetPlatform(); // 复位到 Web 默认实现，避免用例之间互相串平台
+  });
+
+  it("有绝对基址（RN）时把地址带进文案；Web 同源（基址为空）保持原文案", () => {
+    // RN 平台实现返回绝对地址（模拟器默认 http://10.0.2.2:8000；真机是开发机局域网 IP）——
+    // 地址填错时这句话就是最直接的线索（这次事故正是「看不出它打的是哪」）。
+    setPlatform({ apiBaseUrl: () => "http://10.0.2.2:8000" } as unknown as PaPlatform);
+    expect(apiErrorMessage(new axios.AxiosError("Network Error"))).toBe(
+      "网络异常（http://10.0.2.2:8000），请检查网络后重试",
+    );
+    const timeout = new axios.AxiosError("timeout of 30000ms exceeded");
+    timeout.code = "ECONNABORTED";
+    expect(apiErrorMessage(timeout)).toBe("请求超时（http://10.0.2.2:8000），请稍后重试");
+
+    // Web 的 apiBaseUrl() = ""（同源相对路径）→ 文案与改动前逐字一致（桌面端 / H5 零回归）
+    resetPlatform();
+    expect(apiErrorMessage(new axios.AxiosError("Network Error"))).toBe("网络异常，请检查网络后重试");
+  });
+
+  it("信封 message 优先于网络兜底（带地址也不能盖掉后端给的原因）", () => {
+    setPlatform({ apiBaseUrl: () => "http://192.168.5.13:8000" } as unknown as PaPlatform);
+    expect(apiErrorMessage(axiosError(409, { code: 409, data: null, message: "该组织下 SKU 已存在" }))).toBe(
+      "该组织下 SKU 已存在",
+    );
+  });
+});
+
+// 2026-09 真机排障口径：**5xx 且响应体不是 PA 信封 ⇒ 挡在中间的是隧道/网关**。
+//
+// 现场：手机走隧道时审批偶发 503「依赖服务暂不可用，请稍后重试」，重试即成功 ——
+// 而后端当日 0 个 5xx、审批请求在后端日志里**完全不存在**（请求没到后端）。
+// 不区分来源的话，这句话会把人一路带向"后端依赖不可用"的错误结论（Redis/DB/OSS 全部白查）。
+describe("网关/隧道 5xx 的来源提示与重试判定", () => {
+  afterEach(() => {
+    resetPlatform();
+  });
+
+  it("非信封 5xx 追加来源提示（530/502/503 这类中间层错误页）", () => {
+    // 隧道边缘返回的是 HTML/纯文本（没有 message/detail）
+    expect(apiErrorMessage(axiosError(503, "<html>503 Service Unavailable</html>"))).toBe(
+      "依赖服务暂不可用，请稍后重试（非后端信封响应，可能来自隧道/网关）",
+    );
+    expect(apiErrorMessage(axiosError(502, ""))).toContain("（非后端信封响应，可能来自隧道/网关）");
+    expect(apiErrorMessage(axiosError(500, undefined))).toContain("服务暂时开小差（500）");
+  });
+
+  it("后端自己的 5xx 是信封 → 原样展示 message，不加提示（避免误导）", () => {
+    expect(apiErrorMessage(axiosError(500, { code: 500, data: null, message: "服务内部错误" }))).toBe("服务内部错误");
+    // 未配置依赖的 503 也是信封（如 OSS 未配置）→ 保持后端原文，不加"隧道"字样
+    expect(apiErrorMessage(axiosError(503, { code: 503, data: null, message: "OSS 未配置" }))).toBe("OSS 未配置");
+    // 4xx 一律不加来源提示
+    expect(apiErrorMessage(axiosError(404, "not found"))).toBe("内容不存在或已被删除");
+  });
+
+  it("isTransientGatewayFailure：只有「没到后端」的失败才算（幂等重试的判定口径）", () => {
+    expect(isTransientGatewayFailure(new axios.AxiosError("Network Error"))).toBe(true); // 无响应
+    expect(isTransientGatewayFailure(axiosError(503, "<html>edge</html>"))).toBe(true); // 非信封 5xx
+    expect(isTransientGatewayFailure(axiosError(503, { code: 503, data: null, message: "OSS 未配置" }))).toBe(false);
+    expect(isTransientGatewayFailure(axiosError(409, { code: 409, data: null, message: "已被他人定案" }))).toBe(false);
+    expect(isTransientGatewayFailure(new Error("boom"))).toBe(false);
   });
 });
