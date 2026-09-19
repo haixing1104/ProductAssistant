@@ -625,7 +625,7 @@ Redis Streams 是 backend ↔ ai-engine 的**唯一业务通道**，因此按队
 | 前端界面（React + antd） | ✅ 已实现（**P7**，`frontend/`） | 8 条路由（登录/商品/详情/审批/深链/合规/运维/成员），走 backend-api 的 43 个端点；只连 `/api/v1`（不直连 ai-engine/PG） |
 | 移动端 H5（React + antd-mobile） | ✅ 已实现（**P9**，`mobile-h5/`） | 登录 / 商品（列表+详情+SSE 实时生成）/ 审批（列表+详情+深链+批准驳回+补投）/ 我的；**与桌面端共享契约核心层**（`@pa/core` → `frontend/src/{api,services,store,types}`，页面壳各写各的）；只连 `/api/v1` |
 | 移动端原生 App（React Native + Expo） | ✅ 已实现（**P10**，`mobile-rn/`） | iOS + Android 一套代码；与 H5 的页面/组件**逐条对齐**（6 屏 + 深链），并**复用同一份契约核心层**：共享层新增「平台端口」（`frontend/src/services/platform.ts`）承载 6 个平台差异点（接口基址 / 会话回跳 / 过期事件 / 定时器 / JWT 解码 / SSE 与二进制传输），因此 `http.ts`（单飞续签 + 401 重放）与 `sse.ts`（`hitl.waiting` 终态 / `ready` 不重连 / 注释帧三态）**三端共用一份**；UI 为自研薄 UI（零 UI 依赖）；版本锁定与真机验证边界见 `mobile-rn/README.md` |
-| 作品集宣传页（**静态**，`portfolio/`） | ✅ 已实现（**P11**） | 个人作品合集（数据驱动，加作品=加一条数据）+ 三端演示（PC Web / Mobile H5 / Mobile Native（Android & iOS）），共 **7 段**（4 / 2 / 1）+ 段级切换与时长徽标 + 联系方式；**入口**：作品卡标题行「开始使用」跟随端切换（PC Web / Mobile H5 跳各自登录页，原生端给「暂不支持下载」Toast）+ 底部「进入系统」（dev 的基址由 `portfolio/.env.development` 注入本机 5173 / 5174，生产由 `links.live` / `links.liveH5` 提供，两处都空则不渲染 = 禁用占位 + 邮件联系）；**纯静态零后端依赖**（不调 `/api`，可独立部署到任意静态托管） |
+| 作品集宣传页（**静态**，`portfolio/`） | ✅ 已实现（**P11**） | 个人作品合集（数据驱动，加作品=加一条数据）+ 三端演示（PC Web / Mobile H5 / Mobile Native（Android & iOS）），共 **7 段**（4 / 2 / 1）+ 段级切换与时长徽标 + 联系方式；**入口**：标题行「开始使用」与底部「进入系统」**同源、都跟随端切换**（PC Web / Mobile H5 跳各自登录页；原生端标题行给「暂不支持下载」Toast、底部给禁用态 + 一行替代路径；dev 的基址由 `portfolio/.env.development` 注入本机 5173 / 5174，生产由 `links.live` / `links.liveH5` 提供，两处都空则不渲染 = 禁用占位 + 邮件联系）；**纯静态零后端依赖**（不调 `/api`，可独立部署到任意静态托管） |
 
 **当前仓库内可独立跑通的部分**：`__main__` → worker → 图 → 节点 → 适配器 → PG/Redis/OSS/Milvus，
 以及 `tests/` 里用 `InMemorySaver` 的图级测试（207 个用例，其中 195 个纯内存可跑、12 个需容器化 PG+Redis 否则自动 skip）。
@@ -1190,8 +1190,9 @@ OSS 预签名需 `product_id`（图片上传在商品详情页）。
 定位   : 个人作品合集展示页（第一个作品即 ProductAssistant）；将来加作品只加一条数据
 技术栈 : React 19 + TypeScript + Vite 8 + Tailwind CSS 4（原子化 CSS **只装在本模块**）
 入口   : http://localhost:5175（纯静态、无需后端；启动：./scripts/dev-landing.sh，也可独立部署到任意静态托管）
-进入系统: 作品卡标题行「开始使用」**跟随当前端**（PC Web → :5173/login · Mobile H5 → :5174/login ·
-         原生端 → 「App 下载暂未开放」Toast）；基址 dev 走 .env.development，生产走 links.live / liveH5
+进入系统: 标题行「开始使用」与底部「进入系统」**同源、都跟随当前端**（PC Web → :5173/login ·
+         Mobile H5 → :5174/login · 原生端 → 标题行 Toast / 底部禁用 + 一行原因）；
+         基址 dev 走 .env.development，生产走 links.live / liveH5
 数据   : src/data/projects.ts（唯一内容事实源）· 资产约定 public/demos/<slug>/<platform>/<key>.<ext>
 演示   : 三端 7 段（PC Web 4 / Mobile H5 2 / Mobile Native 1）；每段一份动图（已 gifsicle -O3 无损优化）
          桌面 1882×912 · H5 493×854 · 原生 240×520（真机录屏重编码），外框比例取自素材真实尺寸
@@ -1207,10 +1208,11 @@ OSS 预签名需 `product_id`（图片上传在商品详情页）。
    本模块零后端依赖、自包含，将来要拆成独立仓库可原样搬走（`main.tsx` 里没有 `/api`、没有代理）；
 2. **演示「一次只挂载一个端的一段」**：手机上多段动图同时播会掉帧发热；顺带做到「未点开的端与段
    零下载」——动图动辄几 MB，这条最省流量。代价是切回来重新加载（每段 20–35s，可接受）；
-3. **入口按端分流，且只放真链接**：标题行「开始使用」跟随当前端 —— PC Web / Mobile H5 跳各自登录页
-   （新窗口打开，访客不丢宣传页），原生端没有浏览器可跳的 URL，点击给「App 下载暂未开放」Toast 并指向 H5。
-   演示环境未接入时**入口不渲染** + 底部禁用占位 + 邮件联系（访客不会点到一个 404）；接入时只改
-   `data/projects.ts` 的 `links.live` / `links.liveH5` —— 占位态有专门用例守着，改状态时会提醒你同步断言。
+3. **入口按端分流，且只放真链接**：标题行「开始使用」与底部「进入系统」**同源**（共用一份派生值，
+   不会出现两处目标不同步），都跟随当前端 —— PC Web / Mobile H5 跳各自登录页（新窗口打开，访客不丢
+   宣传页）；原生端没有浏览器可跳的 URL：标题行给「App 下载暂未开放」Toast 并指向 H5，底部给禁用态 +
+   一行原因。演示环境未接入时**入口不渲染** + 底部禁用占位 + 邮件联系（访客不会点到一个 404）；
+   接入时只改 `data/projects.ts` 的 `links.live` / `links.liveH5` —— 占位态有专门用例守着。
 
 
 

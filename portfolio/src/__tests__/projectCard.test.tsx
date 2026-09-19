@@ -67,7 +67,10 @@ const project: Project = {
   ],
 };
 
+/** 标题行入口（跟随端，轻量 pill） */
 const entryLink = () => screen.queryByRole("link", { name: /开始使用/ });
+/** 底部主 CTA（与标题行同源，看完演示后的决策点） */
+const bottomLink = () => screen.queryByRole("link", { name: /进入系统/ });
 const platformTab = (name: string) => screen.getByRole("tab", { name });
 const stage = () => screen.getByRole("tabpanel");
 const stageSrc = () => within(stage()).getByRole("img").getAttribute("src");
@@ -80,24 +83,34 @@ describe("作品卡：「开始使用」入口跟随当前端", () => {
     expect(link).toHaveAttribute("href", "https://demo.example.com/login");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+
+    // 底部主 CTA 与标题行入口**同源**（单一事实源）—— href 必须恒等。
+    // 这条断言就是"两处逻辑一致"的机器化表述：谁把底部再写死成 web，它立刻变红。
+    const bottom = screen.getByRole("link", { name: /进入系统/ });
+    expect(bottom.getAttribute("href")).toBe(link.getAttribute("href"));
+    expect(bottom).toHaveAttribute("target", "_blank");
   });
 
-  it("切到 Mobile H5：同一个入口换成 H5 的登录地址（不是多出一个入口）", () => {
+  it("切到 Mobile H5：标题行与底部一起换成 H5 的登录地址（不是多出一个入口）", () => {
     render(<ProjectCard project={project} />);
 
     fireEvent.click(platformTab("Mobile H5"));
 
     expect(screen.getAllByRole("link", { name: /开始使用/ })).toHaveLength(1);
     expect(entryLink()).toHaveAttribute("href", "https://m.example.com/login");
+    // 底部同样跟随 —— 这里钉住"底部不再固定 PC Web"
+    expect(bottomLink()).toHaveAttribute("href", "https://m.example.com/login");
+    expect(bottomLink()?.getAttribute("href")).toBe(entryLink()?.getAttribute("href"));
   });
 
-  it("切回 PC Web：链接又回来（入口不残留上一端的状态）", () => {
+  it("切回 PC Web：两处链接又一起回来（入口不残留上一端的状态）", () => {
     render(<ProjectCard project={project} />);
 
     fireEvent.click(platformTab("Mobile H5"));
     fireEvent.click(platformTab("PC Web"));
 
     expect(entryLink()).toHaveAttribute("href", "https://demo.example.com/login");
+    expect(bottomLink()).toHaveAttribute("href", "https://demo.example.com/login");
   });
 
   it("原生端：入口变成按钮（浏览器里跳不过去），点击弹 Toast 并说清替代路径，几秒后自动消失", () => {
@@ -106,8 +119,12 @@ describe("作品卡：「开始使用」入口跟随当前端", () => {
       render(<ProjectCard project={project} />);
       fireEvent.click(platformTab("Mobile Native (Android & iOS)"));
 
-      // 不给链接、也不给禁用按钮：点了要能解释（否则访客以为坏了）
+      // 标题行不给链接（点了要能解释，否则访客以为坏了）；
+      // 底部不给死链 —— 换成禁用态 + 一行原因（比"点了才弹 Toast"更早说清）
       expect(entryLink()).toBeNull();
+      expect(bottomLink()).toBeNull();
+      expect(screen.getByRole("button", { name: "App 下载暂未开放" })).toBeDisabled();
+      expect(screen.getByText(/尚未上架应用商店/)).toBeTruthy();
       expect(screen.queryByRole("status")).toBeNull();
       const button = screen.getByRole("button", { name: /原生 App/ });
 
