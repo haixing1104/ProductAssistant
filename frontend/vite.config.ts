@@ -20,6 +20,11 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
+    // CI runner 比本地慢 2~3 倍：默认 5s 对「antd 渲染 + userEvent 交互 + findBy* 轮询」这类用例
+    // 太紧 —— 2026-09-20 实测 approvalsPage.test.tsx 的「带评估命中点的单：放行必须写理由（未填时
+    // 确认按钮禁用）」本地 2204ms，CI 上直接 Test timed out in 5000ms（该用例内部本来就有多个
+    // findBy*(timeout: 5000)，单用例总预算必须大于这些小超时之和）。20s 仍能挡住"真卡死"。
+    testTimeout: 20000,
     // 只收集 src 下的用例：e2e/ 交给 playwright（frontend/playwright.config.ts）。
     // 不加这行时 vitest 的默认 include 会把 e2e/login-flow.spec.ts 也当成单测收进来，
     // 然后在 worker 里于**模块顶层**调用 Playwright 的 test.skip(...) → 直接抛

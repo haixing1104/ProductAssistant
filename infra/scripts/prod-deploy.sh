@@ -11,6 +11,7 @@
 # 五步的**顺序即语义**（每一步都在解决一个具体的坑）:
 #   1) ACR 登录      —— 若 .acr-creds 存在（CI 经 stdin 写入）就用它登录并**立即删除**；
 #   2) 数据库迁移     —— 必须在应用起来之前（新代码可能依赖新列/新表）；
+#                        pgsql-setup.sh migrate：只应用 database/sql 里**未执行过**的文件
 #   3) pull           —— 先把镜像取全再切换，避免"起了一半才发现镜像拉不到"；
 #   4) up -d          —— 只重建变化的容器；--remove-orphans 清掉已下线的服务；
 #   5) edge reload    —— ⚠️ 关键一步：nginx 把 upstream 的解析结果**缓存在内存**，
@@ -24,6 +25,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
 
 COMPOSE=(docker compose --env-file infra/.env -f infra/docker-compose.prod.yml)
+ENV_FILE="${ROOT_DIR}/infra/.env"
 TAG_FILE="${ROOT_DIR}/.deploy-tag"
 PREV_TAG_FILE="${ROOT_DIR}/.deploy-tag.prev"
 CREDS_FILE="${ROOT_DIR}/.acr-creds"
@@ -32,11 +34,19 @@ log()  { echo "[deploy] $*"; }
 step() { echo; echo "===== $* ====="; }
 
 # --- 前置检查（失败要给出可执行的下一步，而不是一句 "error"）------------------
-[ -f "${ROOT_DIR}/infra/.env" ] || {
-  echo "!! 缺少 infra/.env —— 生产密钥只存在于服务器：见 infra/docs/deploy.md §4" >&2
+[ -f "${ENV_FILE}" ] || {
+  echo "!! 缺少 ${ENV_FILE} —— 生产密钥只存在于服务器：见 infra/docs/deploy.md §4" >&2
   exit 1
 }
 command -v docker >/dev/null 2>&1 || { echo "!! 未安装 Docker（先跑 prod-bootstrap.sh）" >&2; exit 1; }
+
+# 把 infra/.env 读进本脚本的环境（与 pgsql-setup.sh / backup-pg.sh **同一写法**）。
+#   ⚠️ 修 2026-09-20 实测的 bug：第 1 步要用 PA_IMAGE_REGISTRY 拼 ACR 主机，但此前**没有任何
+#   地方**把它送进脚本 —— compose 的 `--env-file` 只作用于 compose 进程本身，CI 也没有导出它，
+#   于是第 1 步的守卫 `[ -n "${reg_host}" ]` 直接 exit 1。而死的位置在 `rm -f .acr-creds` 之前，
+#   所以症状是「部署步骤 25 秒失败 + .acr-creds 残留 + 从未 docker login 过 + 一个镜像都没拉」，
+#   排障时极易被误判成凭据/网络问题（实测凭据是好的：token 端点返回 200）。
+set -a; . "${ENV_FILE}"; set +a
 
 # --- 解析参数：正常发布或回滚 --------------------------------------------------
 MODE="deploy"
@@ -66,10 +76,14 @@ else
   log "无 ${CREDS_FILE}：沿用 docker 已保存的凭据（若拉取报 unauthorized，见 docs §10）"
 fi
 
-step "2/5 数据库迁移（幂等，forward-only）"
+step "2/5 数据库迁移（forward-only；只应用未执行过的文件，记录在 public.schema_migrations）"
 # PGHOST 显式指向宿主回环：生产 .env 的 POSTGRES_HOST 是**容器视角**的 host.docker.internal，
 # 而本脚本跑在宿主机上（pgsql-setup.sh/backup-pg.sh 内部也有同样的回退，这里是双保险）。
-PGHOST=127.0.0.1 ./infra/scripts/pgsql-setup.sh init
+# ⚠️ 修 2026-09-20 实测：这里原先调的是 `init` —— 那是**一次性引导**脚本，库已初始化时会被
+# `role_pa_admin 已存在` 守卫直接 exit 1，于是每次发布都卡在第 2 步（症状：部署步骤几十秒就
+# 失败、一个镜像都没拉）。改用 `migrate`：库未初始化时它自动走 init；已初始化时只补
+# database/sql 里**未登记**的迁移文件（每个只执行一次），因此可反复执行。
+PGHOST=127.0.0.1 ./infra/scripts/pgsql-setup.sh migrate
 
 step "3/5 拉取镜像（tag=${TAG}）"
 PA_IMAGE_TAG="${TAG}" "${COMPOSE[@]}" pull

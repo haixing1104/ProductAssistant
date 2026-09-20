@@ -290,7 +290,10 @@ jobs:
           printf 'ACR_USERNAME=%s\nACR_PASSWORD=%s\n' "${ACR_USERNAME}" "${ACR_PASSWORD}" \
             | ssh -F ~/.ssh/pa_deploy pa-deploy "umask 077; cat > ${REMOTE_DIR}/.acr-creds"
           # ② 对齐检查（不阻断）：工作流顶部的 ACR_VPC_REGISTRY 应与服务器 infra/.env 里的一致
-          remote_registry="$(ssh -F ~/.ssh/pa_deploy pa-deploy "grep -E '^PA_IMAGE_REGISTRY=' ${REMOTE_DIR}/infra/.env | cut -d= -f2-")"
+          #   注意末尾的 `|| true`：这条只是"信息提示"（下一行用 || echo ::warning:: 表达不一致），
+          #   但在 set -euo pipefail 下，只要 .env 缺失/不可读，grep 非 0 就会**在部署脚本跑之前**
+          #   中止整步 —— 2026-09-20 实测：这一层会把真正的失败原因掩盖掉，排障成本很高。
+          remote_registry="$(ssh -F ~/.ssh/pa_deploy pa-deploy "grep -E '^PA_IMAGE_REGISTRY=' ${REMOTE_DIR}/infra/.env | cut -d= -f2-" || true)"
           echo "服务器 infra/.env ：${remote_registry}"
           echo "CI 常量（VPC）    ：${ACR_VPC_REGISTRY}"
           [ "${remote_registry}" = "${ACR_VPC_REGISTRY}" ] || echo "::warning::两者不一致 —— 服务器会用 infra/.env 里的地址拉镜像（若拉取失败请核对 docs §10）"

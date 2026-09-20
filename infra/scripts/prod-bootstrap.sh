@@ -159,6 +159,24 @@ pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1 \
   || { echo "!! PostgreSQL 未就绪（systemctl status postgresql）" >&2; exit 1; }
 log "PostgreSQL 就绪：$(sudo -u postgres psql -tAc 'SELECT version();' | cut -d, -f1)"
 
+# 防火墙：宿主 PG 必须接受**来自容器网段**的连接。
+#   ⚠️ 2026-09-20 实测踩坑：只改 listen_addresses + pg_hba **不够** —— 本机 ufw 默认
+#   `deny (incoming)`，容器 → 宿主 172.17.0.1:5432 的包被**丢弃**（不是拒绝），表现为
+#   /readyz 一直挂住（curl 报 HTTP 000；因为 psycopg 未设 connect_timeout，OS 级 SYN
+#   重试要 ~2 分钟），而 /healthz 与三个静态站全 200 —— 极易误判成应用层问题。
+#   安全性：172.16.0.0/12 在云上不可路由，且安全组不放行 5432 → 公网到不了，
+#   放行它不扩大暴露面（与上面 pg_hba 的口径一致）。
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
+  if ufw status 2>/dev/null | grep -Eq '^5432/tcp.*172\.16\.0\.0/12'; then
+    log "ufw 已放行 172.16.0.0/12 → 5432（跳过）"
+  else
+    ufw allow from 172.16.0.0/12 to any port 5432 proto tcp comment 'pa-docker-bridge: container -> host PG' >/dev/null
+    log "ufw → 放行 172.16.0.0/12 → 5432/tcp（容器回连宿主 PG）"
+  fi
+else
+  log "ufw 未启用/未安装：若容器连不上宿主 PG，请检查 iptables 的 INPUT 策略"
+fi
+
 # ---------------------------------------------------------------------------
 # S4 目录 + 自签证书兜底 + rsync
 #   为什么需要自签证书：边缘 nginx 的 443 server **必须在启动时**能读到
