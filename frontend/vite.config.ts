@@ -20,6 +20,12 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
+    // 只收集 src 下的用例：e2e/ 交给 playwright（frontend/playwright.config.ts）。
+    // 不加这行时 vitest 的默认 include 会把 e2e/login-flow.spec.ts 也当成单测收进来，
+    // 然后在 worker 里于**模块顶层**调用 Playwright 的 test.skip(...) → 直接抛
+    // "test.skip() can only be called inside test, describe block or fixture"，
+    // 于是 `npm test` 必红、`frontend 测试与构建` 这个 job 一直过不去（2026-09-20 实测）。
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     // 覆盖率门禁（与 backend/ai-engine 对等）：只覆盖「薄逻辑层」（store / 服务 / 纯函数）。
     // UI 页面受 jsdom + antd 约束**不进覆盖率统计**，由真实全栈冒烟 + E2E 守护；
     // 例外：ProductDetailPage / OpsPage 各有一份**页面级回归用例**（生成卡住事故 + 终止卡住任务），

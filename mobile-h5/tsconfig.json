@@ -13,7 +13,19 @@
     "isolatedModules": true,
     "types": ["vitest/globals", "@testing-library/jest-dom"],
     "paths": {
-      "@pa/core/*": ["../frontend/src/*"]
+      "@pa/core/*": ["../frontend/src/*"],
+      // ⚠️ 共享层（frontend/src/{api,services,store,types}）内部是**裸包导入**，tsc 会从
+      //    **那个文件所在目录**向上找 node_modules —— 也就是去找 frontend/node_modules。
+      //    而 CI（只 `npm ci` mobile-h5）与生产镜像（只 COPY frontend/src）里都**没有**那个
+      //    目录 → TS2307，并连锁让共享层做错误归一化的类型守卫失效 →
+      //    frontend/src/services/errors.ts 里 10 处 TS18046「'e' is of type 'unknown'」+ 一串
+      //    TS7006，于是 `npm run build`（= tsc --noEmit && vite build）exit 2，镜像构建失败。
+      //    （2026-09-20 实测踩坑：本地两个 node_modules 都在，所以本地 tsc 是 0 错误，看不出来。）
+      //    这两条把共享层用到的裸包显式映射到**本模块自己的副本**，语义与 vite.config.ts 的
+      //    alias 完全一致 —— tsc 不读 vite 配置，所以两边必须同时维护：
+      //    以后共享层新增裸依赖，这里和 mobile-h5/vite.config.ts 的 alias 都要加。
+      "axios": ["./node_modules/axios"],
+      "zustand": ["./node_modules/zustand"]
     }
   },
   "include": ["src", "vite.config.ts", "../frontend/src/api", "../frontend/src/services", "../frontend/src/store", "../frontend/src/types"]
