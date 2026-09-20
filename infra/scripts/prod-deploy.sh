@@ -88,14 +88,46 @@ PGHOST=127.0.0.1 ./infra/scripts/pgsql-setup.sh migrate
 step "3/5 拉取镜像（tag=${TAG}）"
 PA_IMAGE_TAG="${TAG}" "${COMPOSE[@]}" pull
 
-step "4/5 起栈（只重建变化的容器）"
-PA_IMAGE_TAG="${TAG}" "${COMPOSE[@]}" up -d --remove-orphans
+step "4/5 起栈（只重建变化的容器；--wait 等健康检查通过，别跟启动窗口赛跑）"
+# --wait + --wait-timeout：等所有服务 healthy（没有 healthcheck 的按 running 计）再往下走。
+# 不等也能过，但后面几步就变成跟"容器刚重建、还没热"的窗口赛跑 —— CI 上表现为偶发 502。
+PA_IMAGE_TAG="${TAG}" "${COMPOSE[@]}" up -d --wait --wait-timeout 180 --remove-orphans
 
 step "5/5 重载边缘 nginx（重新解析 upstream；否则后端换 IP 后持续 502）"
-"${COMPOSE[@]}" exec -T edge nginx -s reload && log "edge 已 reload"
+# ⚠️ `nginx -s reload` 只是给 master **发信号**，重载是**异步**的：发完信号后旧 worker 仍可能把
+# 请求打到刚被重建容器的**旧 IP** → 紧接着的验收会拿到 502。2026-09-20 实测复现（CI 那次发布
+# 就是这么判红的，而站点其实 3 秒后就全好）：
+#   up -d --force-recreate backend-api → exec edge nginx -s reload → prod-verify.sh
+#   → ✗ /healthz 502、✗ /readyz 502（其余三项 200）；3 秒后再跑 → 全部通过。
+# 因此这里做两件事：① 重载失败**显式报错**（原来 `exec … && log` 会把失败吞成静默跳过，
+# 排障时看不到任何线索）；② 验收带**有上限的重试窗口**（见下一步），只有持续失败才判红。
+if ! "${COMPOSE[@]}" exec -T edge nginx -s reload; then
+  echo "!! edge reload 失败 —— 先在服务器上跑：${COMPOSE[*]} exec -T edge nginx -t（见 docs §10）" >&2
+  exit 1
+fi
+log "edge 已 reload（异步生效；随后的验收会在重试窗口内等它）"
 
-step "验收（走回环 + Host 头，验证 nginx→应用全链路）"
-./infra/scripts/prod-verify.sh
+step "验收（走回环 + Host 头验证 nginx→应用全链路；最多 6 次、间隔 5s）"
+# 为什么要重试：起栈后容器是"刚重建"的状态，edge 的 upstream 也需要一个重载生效窗口。
+# 单次验收撞上窗口期就判红等于把"部署成功"交给了运气 —— 部署脚本必须容忍"刚起来还没热"，
+# 但也不能无限等：6 次 × 5s 约 25s 的上限内仍失败，说明确实是坏消息（继续排障 → docs §10）。
+verify_ok=0
+for attempt in $(seq 1 6); do
+  if out="$(./infra/scripts/prod-verify.sh 2>&1)"; then
+    printf '%s\n' "${out}"
+    verify_ok=1
+    break
+  fi
+  printf '%s\n' "${out}" | grep -E '^✗' || true
+  if [ "${attempt}" -lt 6 ]; then
+    log "第 ${attempt}/6 次验收未通过（容器或边缘可能仍在预热），5s 后重试"
+    sleep 5
+  fi
+done
+[ "${verify_ok}" = "1" ] || {
+  echo "!! 验收连续 6 次未通过（约 25s 窗口）—— 排障顺序见 infra/docs/deploy.md §10" >&2
+  exit 1
+}
 
 # 记录发布锚点：当前 tag 记为 .deploy-tag，上一个成功 tag 记为 .deploy-tag.prev
 # （回滚 = 读 .deploy-tag.prev → 用它 up -d；DB 迁移**不回滚**，见 docs §8）
