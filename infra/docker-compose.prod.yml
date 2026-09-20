@@ -5,7 +5,10 @@
 # 使用 : docker compose --env-file infra/.env -f infra/docker-compose.prod.yml up -d
 #        （首次初始化 bootstrap、数据库迁移、TLS 证书、日常发布与回滚：
 #          见 infra/docs/deploy.md —— 那份文档与本文的变量/服务名逐一对应）
-# 镜像 : 全部来自阿里云 ACR：${PA_IMAGE_REGISTRY}:<模块>-${PA_IMAGE_TAG}
+# 镜像 : 全部来自阿里云 ACR（**一个源**，不依赖 Docker Hub）：
+#        · 应用 5 个：${PA_IMAGE_REGISTRY}:<模块>-${PA_IMAGE_TAG}
+#        · 基础 2 个：${PA_IMAGE_REGISTRY}:redis-7.4-alpine / :nginx-1.27-alpine
+#          （由 deploy.yml 的 mirror-images job 转推；改这里的 tag 必须同步改那个矩阵）
 #        · PA_IMAGE_REGISTRY 在服务器上取 **VPC 域名**（同地域免公网流量费）
 #        · 不在服务器构建：本机实测 2 vCPU / 1608MB 内存，`vite build`/`pip install`
 #          会 OOM；构建统一在 GitHub Actions 完成（见 docs/deploy.md §1）
@@ -33,7 +36,11 @@ services:
   # 一、边缘：唯一对外暴露端口的容器（TLS 终结 / 路径分流 / /api 反代）
   # ---------------------------------------------------------------------------
   edge:
-    image: nginx:1.27-alpine
+    # ⚠️ 用 ACR 里的副本（deploy.yml 的 mirror-images job 转推），**不要**写 nginx:1.27-alpine：
+    #   本机实测 registry-1.docker.io 直连超时，而 prod-deploy.sh 第 3 步是无
+    #   --ignore-pull-failures 的 `docker compose pull` + set -e —— 即使宿主本地已有同名
+    #   缓存，pull 仍会去问 registry 然后失败，发布就卡死在 3/5 步。
+    image: ${PA_IMAGE_REGISTRY}:nginx-1.27-alpine
     container_name: pa-edge
     ports:
       - "${EDGE_HTTP_PORT:-80}:80"

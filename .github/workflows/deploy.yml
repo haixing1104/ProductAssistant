@@ -2,8 +2,15 @@
 # ProductAssistant | .github/workflows/deploy.yml
 # 用途 : 构建镜像 → 推阿里云 ACR → SSH 部署到 ECS（47.116.53.86 / 华东2 上海）
 # 触发 : workflow_dispatch（手动，三种 mode，推荐）；push tag v*（打版本号即自动发布）
-# 需要 : Secrets —— SSH_HOST / SSH_USER / SSH_PORT / SSH_PRIVATE_KEY
-#                   ACR_USERNAME / ACR_PASSWORD / ALIYUN_ACR_REGISTRY
+# 需要 : Secrets（6 个）—— SSH_HOST / SSH_USER / SSH_PORT / SSH_PRIVATE_KEY
+#                           ACR_USERNAME / ACR_PASSWORD
+#        ⚠️ ACR **地址本身不是密钥**（推/拉都要凭据，地址公开）→ 写成下面 env 里的三个常量。
+#          **不要**从 secrets 派生地址再当 job outputs 传给下游 job：GitHub 会丢弃
+#          "值里含 secret 的输出"（日志只留一行 `Skip output 'ci_host' since it may contain
+#          secret.`），下游拿到的就是**空字符串** → `docker login` 没有目标 registry，
+#          回落到 Docker Hub 并用 ACR 凭据登录 → 报
+#          `Get "https://registry-1.docker.io/v2/": unauthorized: incorrect username or password`。
+#          （2026-09-20 实测踩坑；排障见 infra/docs/deploy.md §10 #16）
 # 三种模式（手动触发时选）:
 #   ping      只验证"密钥接线 + 服务器现状"（whoami/软件/目录/证书），**不改服务器任何东西**
 #   bootstrap 一次性初始化：swap / Docker / PostgreSQL(+容器可达) / rsync / 目录与自签证书。
@@ -13,8 +20,10 @@
 #   实测服务器 2 vCPU / 1608MB 内存 —— `vite build`（Node 常吃 1~2G）与 pip 安装会 OOM。
 #   所以：CI 构建推 ACR，服务器**只 pull**。
 # 为什么基础镜像也要转推 ACR（mirror-images job）:
-#   实测服务器 `registry-1.docker.io` **直连超时** —— redis 这类直接引用的第三方镜像
-#   必须先在 ACR 里有一份，否则 compose pull 必失败（应用镜像本来就来自 ACR）。
+#   实测服务器 `registry-1.docker.io` **直连超时**（`curl -m 8 https://registry-1.docker.io/v2/`
+#   返回 000）—— compose 里直接引用的第三方镜像（redis、以及 edge 用的 nginx）必须先在
+#   ACR 里有一份，否则 `docker compose pull` 必失败。注意：**即使宿主本地已有同名缓存也会
+#   失败**（pull 一定会去问 registry），而 prod-deploy.sh 是 set -e，会卡死在 3/5 步。
 # 完整步骤、验收与排障：infra/docs/deploy.md
 # =============================================================================
 name: 部署到阿里云 ECS
@@ -42,37 +51,16 @@ env:
   MODE: ${{ inputs.mode || 'deploy' }}
   REMOTE_DIR: /srv/pa
 
+  # --- ACR 地址（**非密钥**，见文件头 ⚠️）：改地址只改这三行 -------------------
+  #   ACR_CI_HOST / ACR_CI_REGISTRY : CI 推送用 —— runner 在海外，必须走**公网**域名
+  #   ACR_VPC_REGISTRY              : 服务器拉取用 —— 同地域走 **VPC** 域名，免公网流量费
+  #     必须与服务器 /srv/pa/infra/.env 的 PA_IMAGE_REGISTRY **逐字符一致**；
+  #     deploy job 会对一次（不一致只告警，实际以服务器上的 .env 为准）
+  ACR_CI_HOST: crpi-7sj157u0r3y1jvd8.cn-shanghai.personal.cr.aliyuncs.com
+  ACR_CI_REGISTRY: crpi-7sj157u0r3y1jvd8.cn-shanghai.personal.cr.aliyuncs.com/lihaixing-docker-image-rep/application_assistant
+  ACR_VPC_REGISTRY: crpi-7sj157u0r3y1jvd8-vpc.cn-shanghai.personal.cr.aliyuncs.com/lihaixing-docker-image-rep/application_assistant
+
 jobs:
-  # ---------------------------------------------------------------------------
-  # 归一化镜像地址：把 ALIYUN_ACR_REGISTRY 统一成
-  #   ci_registry  = 公网域名 + 命名空间/仓库（CI 推送用；runner 在海外）
-  #   vpc_registry = VPC 域名 + 同一路径（服务器拉取用；同地域免流量费）
-  # 于是**无论** Secrets 里填的是公网还是 VPC 地址、带不带仓库路径，都能跑通。
-  # ---------------------------------------------------------------------------
-  prepare:
-    name: 归一化 ACR 地址
-    runs-on: ubuntu-latest
-    outputs:
-      ci_registry: ${{ steps.n.outputs.ci_registry }}
-      ci_host: ${{ steps.n.outputs.ci_host }}
-    steps:
-      - id: n
-        name: 派生公网（推送）与 VPC（拉取）两个地址
-        run: |
-          set -euo pipefail
-          raw='${{ secrets.ALIYUN_ACR_REGISTRY }}'
-          raw="${raw%/}"                       # 去尾斜杠
-          host="${raw%%/*}"                    # 第一段 = 域名
-          path="${raw#"$host"}"                # 其余 = /命名空间/仓库（可能为空）
-          # 兜底：只填了域名时补默认仓库路径（本项目实际使用的 ACR 路径）
-          [ -n "${path}" ] || path="/lihaixing-docker-image-rep/application_assistant"
-          # 统一成"公网域名"（去掉 -vpc），再派生 VPC 域名
-          pub_host="${host/-vpc.cn-shanghai.personal.cr.aliyuncs.com/.cn-shanghai.personal.cr.aliyuncs.com}"
-          vpc_host="${pub_host/.cn-shanghai.personal.cr.aliyuncs.com/-vpc.cn-shanghai.personal.cr.aliyuncs.com}"
-          echo "ci_registry=${pub_host}${path}"  >> "$GITHUB_OUTPUT"
-          echo "ci_host=${pub_host}"             >> "$GITHUB_OUTPUT"
-          echo "推送地址（CI）：${pub_host}${path}"
-          echo "拉取地址（ECS）：${vpc_host}${path}"
 
   # ---------------------------------------------------------------------------
   # 构建并推送 5 个应用镜像（tag = <模块>-<git sha>）
@@ -82,7 +70,6 @@ jobs:
   # ---------------------------------------------------------------------------
   build-push:
     name: 构建并推送 ${{ matrix.name }}
-    needs: prepare
     if: ${{ github.event_name == 'push' || inputs.mode == 'deploy' }}
     runs-on: ubuntu-latest
     strategy:
@@ -97,14 +84,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 校验地址 + 导出给下面的 `with:` 用。为什么要有这一步"导出"：
+      #   · 值来自顶部的**非密钥常量** → 写进步骤输出不会有"含 secret 被丢弃"的风险
+      #     （这正是原来的 prepare job 翻车的地方，见文件头 ⚠️）；
+      #   · steps.*.outputs.* 是 `with:` 里确定可用的取值方式（env 上下文在 with/env
+      #     这类位置支持面更窄，这里干脆不依赖它）。
+      # 顺带做前缀校验：地址拼错时在这里就红，而不是等 docker login 报一堆网络错误。
+      - id: acr
+        name: 校验镜像地址并导出
+        run: |
+          set -euo pipefail
+          case "${ACR_CI_REGISTRY}" in
+            "${ACR_CI_HOST}"/*) ;;
+            *) echo "::error::ACR_CI_REGISTRY（${ACR_CI_REGISTRY}）必须以 ACR_CI_HOST（${ACR_CI_HOST}）开头 —— 改 deploy.yml 顶部的三个常量"; exit 1 ;;
+          esac
+          { echo "ci_host=${ACR_CI_HOST}"; echo "ci_registry=${ACR_CI_REGISTRY}"; } >> "$GITHUB_OUTPUT"
+          echo "推送地址（CI/公网）：${ACR_CI_REGISTRY}"
+          echo "拉取地址（ECS/VPC）：${ACR_VPC_REGISTRY}"
+
       - uses: docker/setup-buildx-action@v3
 
+      # 用裸 docker login 而不是 docker/login-action：全文件只有**一种**凭据处理模式
+      # （与 mirror-images 一字不差），凭据经 stdin，不进命令行、不进日志。
       - name: 登录 ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ needs.prepare.outputs.ci_host }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: echo "${ACR_PASSWORD}" | docker login -u "${ACR_USERNAME}" --password-stdin "${ACR_CI_HOST}"
 
       - name: 构建并推送
         uses: docker/build-push-action@v6
@@ -112,7 +118,7 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ needs.prepare.outputs.ci_registry }}:${{ matrix.name }}-${{ github.sha }}
+          tags: ${{ steps.acr.outputs.ci_registry }}:${{ matrix.name }}-${{ github.sha }}
           build-args: |
             PIP_INDEX_URL=https://pypi.org/simple
             PIP_EXTRA_INDEX_URL=https://pypi.org/simple
@@ -122,25 +128,35 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 第三方基础镜像转推 ACR（服务器连不上 Docker Hub，必须先在 ACR 里有一份）
-  # 命名与 compose 里的引用一致：<registry>:redis-7.4-alpine
+  # 命名与 compose 里的引用**严格对应**（两处必须同时改，只改一处 = 部署时 pull 失败）：
+  #   <registry>:redis-7.4-alpine  ← compose 的 pa-redis-prod
+  #   <registry>:nginx-1.27-alpine ← compose 的 pa-edge
   # ---------------------------------------------------------------------------
   mirror-images:
-    name: 转推基础镜像 redis:7.4-alpine
-    needs: prepare
+    name: 转推基础镜像 ${{ matrix.name }}
     if: ${{ github.event_name == 'push' || inputs.mode == 'deploy' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # 一个镜像失败不拖累另一个（能推的先推上去）
+      matrix:
+        include:
+          - { name: redis, src: redis:7.4-alpine,  tag: redis-7.4-alpine }
+          - { name: nginx, src: nginx:1.27-alpine, tag: nginx-1.27-alpine }
     steps:
+      # 不需要 setup-buildx：这里只做"拉公网镜像 → 重打 tag → 推 ACR"，不构建
       - name: 拉公网镜像 → 重打 tag → 推 ACR
         env:
           ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          SRC: ${{ matrix.src }}
+          TAG: ${{ matrix.tag }}
         run: |
           set -euo pipefail
-          echo "${ACR_PASSWORD}" | docker login -u "${ACR_USERNAME}" --password-stdin '${{ needs.prepare.outputs.ci_host }}'
-          src="redis:7.4-alpine"
-          dst='${{ needs.prepare.outputs.ci_registry }}:redis-7.4-alpine'
-          docker pull "${src}"
-          docker tag "${src}" "${dst}"
+          echo "${ACR_PASSWORD}" | docker login -u "${ACR_USERNAME}" --password-stdin "${ACR_CI_HOST}"
+          dst="${ACR_CI_REGISTRY}:${TAG}"
+          echo "转推：${SRC}  →  ${dst}"
+          docker pull "${SRC}"
+          docker tag "${SRC}" "${dst}"
           docker push "${dst}"
 
   # ---------------------------------------------------------------------------
@@ -150,7 +166,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: 部署（mode=${{ inputs.mode || 'deploy' }}）
-    needs: [prepare, build-push, mirror-images]
+    needs: [build-push, mirror-images]
     # ping/bootstrap 模式下 build-push 与 mirror-images 会被**跳过**（result=skipped），
     # 所以这里用 "!= failure" 表达"只要构建没失败就继续"。
     if: ${{ !cancelled() && needs.build-push.result != 'failure' && needs.mirror-images.result != 'failure' }}
@@ -163,7 +179,8 @@ jobs:
       ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
       ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
       IMAGE_TAG: ${{ github.sha }}
-      VPC_REGISTRY: ${{ needs.prepare.outputs.vpc_registry }}
+      # 这里不再派生 VPC 地址：工作流顶部的 ACR_VPC_REGISTRY 在每个 run 步骤里就是环境变量，
+      # 对齐检查直接用 ${ACR_VPC_REGISTRY}（少一层 needs.outputs，就少一类"静默为空"的坑）
     steps:
       - uses: actions/checkout@v4
 
@@ -244,11 +261,11 @@ jobs:
           #    prod-deploy.sh 读完立即删除；权限 600 由远端 umask 保证。
           printf 'ACR_USERNAME=%s\nACR_PASSWORD=%s\n' "${ACR_USERNAME}" "${ACR_PASSWORD}" \
             | ssh -F ~/.ssh/pa_deploy pa-deploy "umask 077; cat > ${REMOTE_DIR}/.acr-creds"
-          # ② 对齐检查（不阻断）：CI 派生的拉取地址应与服务器 infra/.env 里的一致
+          # ② 对齐检查（不阻断）：工作流顶部的 ACR_VPC_REGISTRY 应与服务器 infra/.env 里的一致
           remote_registry="$(ssh -F ~/.ssh/pa_deploy pa-deploy "grep -E '^PA_IMAGE_REGISTRY=' ${REMOTE_DIR}/infra/.env | cut -d= -f2-")"
           echo "服务器 infra/.env ：${remote_registry}"
-          echo "CI 派生（VPC）    ：${VPC_REGISTRY}"
-          [ "${remote_registry}" = "${VPC_REGISTRY}" ] || echo "::warning::两者不一致 —— 服务器会用 infra/.env 里的地址拉镜像（若拉取失败请核对 docs §10）"
+          echo "CI 常量（VPC）    ：${ACR_VPC_REGISTRY}"
+          [ "${remote_registry}" = "${ACR_VPC_REGISTRY}" ] || echo "::warning::两者不一致 —— 服务器会用 infra/.env 里的地址拉镜像（若拉取失败请核对 docs §10）"
           # ③ 发布（脚本内含：迁移 → pull → up → edge reload → prod-verify 验收）
           ssh -F ~/.ssh/pa_deploy pa-deploy "cd ${REMOTE_DIR} && ./infra/scripts/prod-deploy.sh '${IMAGE_TAG}'"
 
