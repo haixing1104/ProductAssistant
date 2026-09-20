@@ -27,3 +27,9 @@ coverage/
 .idea/
 .vscode/
 .DS_Store
+
+# --- 生产部署（infra/nginx）：证书与 ACME webroot 绝不入库 ---
+# 证书由 certbot 在服务器上签发（或阿里云免费证书），私钥一旦入库等于公开；
+# www/ 是 certbot --webroot 的挑战文件目录，属运行期产物。
+infra/nginx/certs/
+infra/nginx/www/

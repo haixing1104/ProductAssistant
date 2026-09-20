@@ -1,0 +1,134 @@
+# =============================================================================
+# ProductAssistant | .github/workflows/ci.yml
+# 用途 : 推送/PR 的门禁 —— 三套测试（backend / ai-engine / 三个前端）+ 环境变量契约自检
+# 触发 : push 到 master · 任意 pull_request · 手动 workflow_dispatch
+# 设计 :
+#   · 后端与 ai-engine **复用仓库既有的容器化测试编排**（infra/docker-compose.*-test.yml），
+#     不在 CI 里另写一套安装步骤 —— 保证「CI 跑的 = 本地跑的 = README 写的」三者同一口径；
+#   · 三个前端各自独立 job（matrix）：**必须整仓 checkout**，因为 mobile-h5 与桌面端
+#     共用契约层（`@pa/core` → ../frontend/src），只取子目录会直接构建失败；
+#   · env-contract 这步挡的是"最贵的一类回归"：代码/compose 新读了一个环境变量，
+#     却没有登记进 infra/.env.template（生产上线时才发现缺键，往往已经在服务器上了）。
+#   · pip 源在 CI 里显式覆盖为官方源：镜像默认走清华/阿里云（国内构建快），
+#     而 GitHub runner 在海外，用国内源反而慢 → 见下面 --build-arg。
+# 与发布的关系 : deploy.yml 不重复跑测试，发布前请确认本工作流是绿的。
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支重复推送时取消旧任务（省 runner 分钟；测试结果以最新一次为准）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 后端：容器化套件（临时 postgres:17 + redis + pytest；宿主机只需 Docker）
+  # ---------------------------------------------------------------------------
+  backend-tests:
+    name: backend-api 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建测试镜像（显式走官方 PyPI：runner 在海外）
+        run: |
+          docker compose -f infra/docker-compose.backend-test.yml build \
+            --build-arg PIP_INDEX_URL=https://pypi.org/simple \
+            --build-arg PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+
+      # --abort-on-container-exit：任一容器退出即停；--exit-code-from：用测试容器的退出码
+      # 决定本步成败（否则 compose 永远返回 0，红绿就失去意义）。
+      - name: 跑测试（临时库，不碰任何真实数据）
+        run: |
+          docker compose -f infra/docker-compose.backend-test.yml up \
+            --abort-on-container-exit --exit-code-from backend-tests
+
+      - name: 收尾（无论成败都销毁容器与临时库）
+        if: always()
+        run: docker compose -f infra/docker-compose.backend-test.yml down -v
+
+  # ---------------------------------------------------------------------------
+  # ai-engine：容器化套件（临时 PG + Redis + pytest；PA_TEST_* 注入测试用 DSN）
+  # ---------------------------------------------------------------------------
+  ai-engine-tests:
+    name: ai-engine 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建测试镜像（显式走官方 PyPI：runner 在海外）
+        run: |
+          docker compose -f infra/docker-compose.ai-test.yml build \
+            --build-arg PIP_INDEX_URL=https://pypi.org/simple \
+            --build-arg PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+
+      - name: 跑测试
+        run: |
+          docker compose -f infra/docker-compose.ai-test.yml up \
+            --abort-on-container-exit --exit-code-from ai-tests
+
+      - name: 收尾
+        if: always()
+        run: docker compose -f infra/docker-compose.ai-test.yml down -v
+
+  # ---------------------------------------------------------------------------
+  # 三个前端：依赖 → 类型 → 用例 → 生产构建（四步都过才算绿）
+  #   tsc 与 build 都跑：build 里虽然也有 tsc，但分开跑能更快定位"是类型错还是构建错"
+  # ---------------------------------------------------------------------------
+  frontend-tests:
+    name: ${{ matrix.module }} 测试与构建
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # 一个前端失败不影响另外两个跑完（一次拿到全部问题）
+      matrix:
+        module: [frontend, mobile-h5, portfolio]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.module }}/package-lock.json
+
+      - name: 安装依赖
+        working-directory: ${{ matrix.module }}
+        run: npm ci
+
+      - name: 类型检查（0 错误才算过）
+        working-directory: ${{ matrix.module }}
+        run: npx tsc --noEmit
+
+      - name: 单元测试
+        working-directory: ${{ matrix.module }}
+        run: npm test
+
+      - name: 生产构建
+        working-directory: ${{ matrix.module }}
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # 环境变量契约自检（三方一致性：代码读的 / 模板登记的 / .env 实配的）
+  #   CI 里没有 infra/.env → 先用 env-init.sh 由模板生成一份（含 CHANGE_ME 占位符），
+  #   日常模式（不带 --prod）把弱口令当 WARN，因此这一步只挡"缺键 / 未登记键"这类契约漂移。
+  # ---------------------------------------------------------------------------
+  env-contract:
+    name: 环境变量契约自检
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 由模板生成 .env（幂等；不覆盖已有值）
+        run: ./infra/scripts/env-init.sh
+
+      - name: 契约自检（缺键为 ERROR；弱口令/未登记键为 WARN）
+        run: ./infra/scripts/env-check.sh

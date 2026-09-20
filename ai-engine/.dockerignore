@@ -1,0 +1,33 @@
+# =============================================================================
+# ProductAssistant | ai-engine/.dockerignore
+# 用途 : ai-engine 运行镜像构建时的上下文排除清单
+# 为什么需要「模块级」这一份:
+#   Docker 只读**构建上下文根目录**的 .dockerignore。本模块生产镜像的构建命令是
+#   `docker build -f ai-engine/Dockerfile ai-engine`（上下文 = 模块目录），
+#   仓库根那份对它**不生效**。缺了本文件，.venv/（langgraph + pymilvus 等，
+#   数百 MB）与 tests/ 会被打进上下文。
+# 注意 : 本文件**不影响**测试镜像 ai-engine/tests/Dockerfile —— 它的构建上下文是
+#        **仓库根**（compose 里 context: ..），因此那份走根 .dockerignore。
+# =============================================================================
+
+# --- 依赖与虚拟环境（镜像内由 pip install 重建）---
+.venv/
+**/__pycache__/
+*.py[cod]
+
+# --- 测试与产物（生产镜像不带测试）---
+tests/
+.pytest_cache/
+htmlcov/
+.coverage
+.ruff_cache/
+
+# --- 密钥与本地配置（不落镜像；运行期由 compose 的 env_file 注入）---
+.env
+.env.*
+!.env.example
+
+# --- 编辑器/系统 ---
+.idea/
+.vscode/
+.DS_Store

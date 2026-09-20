@@ -15,6 +15,12 @@ const selfDep = (name: string) => fileURLToPath(new URL(`./node_modules/${name}`
 
 export default defineConfig({
   plugins: [react()],
+  // 生产挂在 https://<域名>/m/ 下（边缘 nginx 用 `proxy_pass http://pa-mobile-h5/;` 剥离前缀）：
+  //   · base 决定**产物里资源引用**的路径（打成 /m/assets/…）与 dev server 的挂载点；
+  //   · 必须与 src/main.tsx 的 `<BrowserRouter basename="/m">` **成对存在** ——
+  //     只改 base 会白屏（路由不认 /m 前缀），只改 basename 会资源 404。
+  //   · dev 下访问地址随之变为 http://localhost:5174/m（不再是根路径）。
+  base: "/m/",
   resolve: {
     alias: {
       // 用法：@pa/core/api（→ frontend/src/api）、@pa/core/services/http、@pa/core/types/api…

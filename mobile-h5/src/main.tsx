@@ -146,7 +146,11 @@ function Root() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
-    <BrowserRouter>
+    {/* basename="/m" 必须与 vite.config.ts 的 `base: "/m/"` **成对存在**（生产挂在 /m/ 下）：
+        浏览器地址是 /m/products/x（边缘 nginx 不改写地址栏），basename 负责把它还原成路由
+        /products/x；两者只改一处 = 白屏（只改 base）或资源 404（只改 basename）。
+        dev 地址因此是 http://localhost:5174/m */}
+    <BrowserRouter basename="/m">
       <Root />
     </BrowserRouter>
   </QueryClientProvider>,

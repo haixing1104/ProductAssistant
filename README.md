@@ -37,6 +37,10 @@
 
 ## 前置条件（必须先完成，后续所有步骤都依赖）
 
+> **本地开发**走下面这套；**生产部署**（阿里云 ECS + ACR + GitHub Actions：域名 / 证书 / CI-CD /
+> 发布回滚 / 故障排查 SOP）不在本文件里 —— 见 **`infra/docs/deploy.md`**（可直接粘贴执行的步骤手册）。
+> 两条路径共用同一份环境变量契约（`infra/.env.template`）与同一套测试编排（`infra/docker-compose.*-test.yml`）。
+
 ### 一、安装并验证 Docker（宿主机，全程国内镜像）
 
 > 需要 Docker 的场景：`infra/docker-compose.yml`（Redis/Milvus）、`infra/docker-compose.test.yml`（数据库测试容器）、
@@ -1159,7 +1163,7 @@ GET  /api/v1/ops/dlq?domain=job:generate   → 死信回看（只读；重投走
 | P5 | SSE（`stream-ticket` + `stream`：回放 + 尾随 + 终态/空闲关流 + Last-Event-ID 续传） | ✅ |
 | P6 | 合规词库/规则 CRUD + 快照预览；运维只读面（心跳/PEL/DLQ） | ✅ |
 | P7 | frontend（React 19 + antd 6 + Vite 8）：登录/商品/详情（打字机 + 轨迹）/审批（含深链）/合规/运维/成员，8 条路由 | ✅ |
-| P8 | nginx 双层 + 生产 compose + CI + 全栈冒烟 | ⏳ 待做 |
+| P8 | nginx 双层 + 生产 compose + CI + 全栈冒烟：`infra/nginx/*`（TLS + 路径分流 + SSE 关缓冲）、`infra/docker-compose.prod.yml`（Milvus 走 `rag` profile）、`.github/workflows/{ci,deploy}.yml`（ACR 构建 + SSH 部署 + 验收）、`infra/scripts/prod-*.sh`；手册见 `infra/docs/deploy.md` | ✅ |
 | P9 | mobile-h5（React + antd-mobile）：登录 / 商品 / 详情（SSE）/ 审批（含深链）/ 我的；与桌面端共享契约核心层 | ✅ |
 | P10 | mobile-rn（React Native + Expo 57）：iOS + Android 一套代码（6 屏 + 深链）；共享层抽出「平台端口」承载 6 个平台差异点 | ✅ |
 | P11 | portfolio（作品集宣传页）：数据驱动的作品合集 + 三端 7 段演示（段级切换 + 时长徽标）+ 联系方式 + 「开始使用」入口（跟随端：Web/H5 跳各自登录页、原生端 Toast；dev 指本机 5173/5174，生产等 `links.live`/`liveH5`）；纯静态零后端依赖（Tailwind v4 只装在本模块） | ✅ |

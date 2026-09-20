@@ -1,9 +1,38 @@
-# backend-api 构建上下文排除项（运行镜像只装 requirements.txt + src/）
+# =============================================================================
+# ProductAssistant | backend-api/.dockerignore
+# 用途 : backend-api 镜像构建时的上下文排除清单
+# 为什么「模块级」这份不可省:
+#   Docker 只读**构建上下文根目录**的 .dockerignore。本模块构建命令是
+#   `docker build -f backend-api/Dockerfile backend-api`（上下文 = 模块目录），
+#   仓库根那份对它**不生效** —— 缺了本文件，.venv/（几百 MB）与 tests/ 会被打进
+#   上下文，每次构建先打包上传一遍（实测明显变慢），而镜像里根本用不到它们：
+#   Dockerfile 只 COPY requirements.txt 与 src/。
+# =============================================================================
+
+# --- 依赖与虚拟环境（镜像内由 pip install 重建，绝不需要上下文里的副本）---
 .venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+**/__pycache__/
+*.py[cod]
+
+# --- 测试与产物（镜像不带测试；测试走 infra/docker-compose.backend-test.yml）---
 tests/
+.pytest_cache/
+htmlcov/
+.coverage
+.ruff_cache/
+
+# --- 模块内文档与工具配置（运行镜像不需要）---
 README.md
 requirements-dev.txt
 pyproject.toml
+
+# --- 密钥与本地配置（不落镜像；运行期由 compose 的 env_file 注入）---
+.env
+.env.*
+!.env.example
+
+# --- 编辑器/系统 ---
+.idea/
+.vscode/
+.DS_Store
+

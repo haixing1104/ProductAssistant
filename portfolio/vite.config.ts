@@ -11,7 +11,16 @@ import { defineConfig } from "vite";
 //   2. **Tailwind v4 插件只在这里注册** —— 原子化 CSS 是本模块的局部选择，
 //      frontend/（antd）、mobile-h5/（antd-mobile）、mobile-rn/（自研薄 UI）的构建链路零改动；
 //   3. **深色模式跟系统**（v4 默认 prefers-color-scheme）—— 不做切换按钮，少一个状态与 FOUC 风险。
-export default defineConfig({
+//
+// 生产子路径（本项目挂在 https://seektruth.org.cn/welcome/）:
+//   base **只在生产构建时**生效（`mode === "production"`）—— 这样：
+//     · 生产产物引用打成 /welcome/assets/…，与边缘 nginx 的 `proxy_pass http://pa-portfolio/;`
+//       （剥离 /welcome/ 前缀）对齐，静态容器里仍然是 /assets/…；
+//     · dev（:5175）与 vitest 仍挂在根路径，`scripts/dev-landing.sh` 的探活
+//       （curl http://localhost:5175/）与 portfolio/README.md 的验收命令一行都不用改。
+//   lib/asset.ts 的 publicFile() 会跟随 base，所以页面代码无需改动。
+export default defineConfig(({ mode }) => ({
+  base: mode === "production" ? "/welcome/" : "/",
   plugins: [react(), tailwindcss()],
   server: {
     // 端口占用即报错（不许静默换端口）：5173 = frontend、5174 = mobile-h5、5175 = 本模块
@@ -41,4 +50,5 @@ export default defineConfig({
       thresholds: { statements: 80, branches: 75, functions: 75, lines: 80 },
     },
   },
-});
+}));
+

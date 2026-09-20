@@ -1,0 +1,25 @@
+# =============================================================================
+# ProductAssistant | portfolio/.dockerignore
+# 用途 : 作品集宣传页镜像构建时的上下文排除清单
+# 为什么需要「模块级」这一份:
+#   Docker 只读**构建上下文根目录**的 .dockerignore；本模块构建命令是
+#   `docker build -f portfolio/Dockerfile portfolio`（上下文 = 模块目录），
+#   仓库根那份对它不生效。
+# 注意 : public/demos/**（约 19MB 演示动图）**必须留在上下文里** —— 它们是页面资产，
+#        会随 vite build 进 dist/。只有原始录屏母带（demo-index/，几百 MB，已在
+#        根 .gitignore 与根 .dockerignore 排除）不该出现。
+# =============================================================================
+
+# --- 依赖与构建产物（镜像内 npm ci / vite build 重建）---
+node_modules/
+dist/
+coverage/
+
+# --- 本地环境文件（dev 专用：只被 `vite dev` 读取，生产构建不读）---
+.env.development
+.env.*.local
+
+# --- 编辑器/系统 ---
+.idea/
+.vscode/
+.DS_Store

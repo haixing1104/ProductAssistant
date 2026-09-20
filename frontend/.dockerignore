@@ -1,11 +1,33 @@
-# 构建上下文排除（镜像只需源码 + 锁文件；产物在镜像内构建）
+# =============================================================================
+# ProductAssistant | frontend/.dockerignore
+# 用途 : PC 工作台镜像构建时的上下文排除清单
+# 为什么「模块级」这份不可省:
+#   Docker 只读**构建上下文根目录**的 .dockerignore。本模块构建命令是
+#   `docker build -f frontend/Dockerfile frontend`（上下文 = 模块目录），
+#   仓库根那份对它**不生效** —— 缺了本文件，node_modules/（数百 MB）、dist/、
+#   coverage/、playwright 产物都会被打进上下文，而镜像内会由 `npm ci` 重建这些。
+# 说明 : 生产构建**不需要任何 .env 文件**（三端接口基址都是相对路径 /api/v1，
+#        见 src/services/platform.ts）→ 排除 .env* 既能缩小上下文也不泄露本机配置。
+# =============================================================================
+
+# --- 依赖与构建产物（镜像内 npm ci / vite build 重建）---
 node_modules/
 dist/
 coverage/
+
+# --- 测试与 E2E 产物（镜像不需要；e2e 用宿主 chromium 跑）---
 e2e/
 playwright-report/
 test-results/
+
+# --- 环境文件与构建输入自身 ---
 .env
 .env.*
 Dockerfile
 .dockerignore
+
+# --- 编辑器/系统 ---
+.idea/
+.vscode/
+.DS_Store
+

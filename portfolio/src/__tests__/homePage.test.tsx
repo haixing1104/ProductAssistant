@@ -26,18 +26,27 @@ describe("作品集首页", () => {
     expect(within(footer).getByRole("button", { name: "复制邮箱" })).toBeInTheDocument();
   });
 
-  // 这条用例就是「演示环境未接入」这个状态的契约：将来 `links.live` 填上之后，
-  // 它会失败并提醒你一起把占位态的断言改掉（否则页面上会同时出现死按钮和真链接）。
+  // 演示环境**已接入**（`links.live` / `links.liveH5` 已填生产域名）之后的状态契约：
+  //   · 底部「进入系统 →」与标题行「开始使用」都必须是**真链接**（占位态必须消失，
+  //     否则页面上会同时出现禁用的死按钮和真链接）；
+  //   · 两者**同源**：同一个 href（标题行是入口、底部是主 CTA，指向同一地址）；
+  //   · 必须是 https —— 与 __tests__/projects.test.ts 的基址门禁互为正反面：
+  //     那边管"数据格式"，这里管"页面真的用上了数据"。
+  //   · 原生端（rn Tab）例外：没有可跳的 URL → 底部是禁用占位、标题行是 Toast 按钮，
+  //     那部分契约由 __tests__/projectCard.test.tsx 用构造数据守护。
   //
-  // 两个入口都要守住：底部「进入系统 →」与标题行右侧的「开始使用」。
-  // 后者在 dev 下由 `.env.development` 注入本机端口（5173 / 5174），而 vitest 的 mode 是
-  // `test`（不读 .env.development）—— 所以这里看到的正是**生产未接入**的样子。
-  it("演示环境未接入时：「进入系统」是禁用占位态、「开始使用」不渲染（都不是死链）", () => {
+  // 注意：vitest 的 mode 是 `test`（不读 .env.development），所以这里看到的就是**生产**形态。
+  it("演示环境已接入：两个入口都是 https 真链接，且底部与标题行同源", () => {
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "演示环境准备中" })).toBeDisabled();
-    expect(screen.queryByRole("link", { name: /进入系统/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: /开始使用/ })).toBeNull();
+    const enterLink = screen.getByRole("link", { name: /进入系统/ });
+    const startLink = screen.getByRole("link", { name: /开始使用/ });
+
+    expect(enterLink).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
+    expect(enterLink.getAttribute("href")).toBe(startLink.getAttribute("href"));
+
+    // 占位态与"邮件联系我试用"的兜底组合必须消失（已接入就不该再出现）
+    expect(screen.queryByRole("button", { name: "演示环境准备中" })).toBeNull();
   });
 
 });

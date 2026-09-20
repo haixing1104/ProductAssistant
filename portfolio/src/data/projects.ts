@@ -49,14 +49,16 @@ export const projects: Project[] = [
       "工程化：幂等迁移与种子脚本、容器化数据库测试套件、三端类型与用例门禁（0 错误才算过）",
     ],
     links: {
-      // ── 演示环境落地后取消注释即可（组件无需改动，「开始使用」与「进入系统」立刻变真链接）──
-      // 只填**基址**：登录页 = 基址 + `/login`（三端路径一致，由 lib/entry.ts 拼）。
-      // live:   "https://demo.example.com",   // PC Web
-      // liveH5: "https://m.example.com",      // Mobile H5（不填则回退 live）
-      // repo:   "https://github.com/<your-account>/ProductAssistant",
+      // ── 生产入口（**已接入** seektruth.org.cn）──
+      // 只填**基址**：登录页 = 基址 + `/login`（三端路径一致，由 lib/entry.ts 拼一次）。
+      // 门禁（__tests__/projects.test.ts）要求：https、结尾不带 /、不含 /login。
+      live: "https://seektruth.org.cn", // PC Web（挂在根路径）
+      liveH5: "https://seektruth.org.cn/m", // Mobile H5（挂在 /m，边缘 nginx 剥离前缀）
+      // repo: "https://github.com/haixing1104/ProductAssistant", // 仓库若是私有则不要填（访客拿到 404）
       //
-      // dev 下这两个端已经能跳（指向本机 5173 / 5174），走的是 .env.development 的
-      // VITE_ENTRY_BASE_URL / VITE_ENTRY_H5_BASE_URL —— 不写在这里是因为本仓门禁要求 https。
+      // dev 下这两个端指向本机（5173 / 5174），走 .env.development 的
+      // VITE_ENTRY_BASE_URL / VITE_ENTRY_H5_BASE_URL —— env 非空即整体覆盖本数据，
+      // 且上面那条门禁要求 https，所以 http://localhost 进不了这里（两个环境天然分层）。
     },
     demos: [
       {

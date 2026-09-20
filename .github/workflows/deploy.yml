@@ -1,0 +1,274 @@
+# =============================================================================
+# ProductAssistant | .github/workflows/deploy.yml
+# 用途 : 构建镜像 → 推阿里云 ACR → SSH 部署到 ECS（47.116.53.86 / 华东2 上海）
+# 触发 : workflow_dispatch（手动，三种 mode，推荐）；push tag v*（打版本号即自动发布）
+# 需要 : Secrets —— SSH_HOST / SSH_USER / SSH_PORT / SSH_PRIVATE_KEY
+#                   ACR_USERNAME / ACR_PASSWORD / ALIYUN_ACR_REGISTRY
+# 三种模式（手动触发时选）:
+#   ping      只验证"密钥接线 + 服务器现状"（whoami/软件/目录/证书），**不改服务器任何东西**
+#   bootstrap 一次性初始化：swap / Docker / PostgreSQL(+容器可达) / rsync / 目录与自签证书。
+#             幂等可反复跑；实现在 infra/scripts/prod-bootstrap.sh（脚本入库便于审查与手工重跑）
+#   deploy    发布：迁移 → 拉镜像 → 起栈 → 重载边缘 → 验收（infra/scripts/prod-deploy.sh）
+# 为什么构建在 CI 而不在服务器 :
+#   实测服务器 2 vCPU / 1608MB 内存 —— `vite build`（Node 常吃 1~2G）与 pip 安装会 OOM。
+#   所以：CI 构建推 ACR，服务器**只 pull**。
+# 为什么基础镜像也要转推 ACR（mirror-images job）:
+#   实测服务器 `registry-1.docker.io` **直连超时** —— redis 这类直接引用的第三方镜像
+#   必须先在 ACR 里有一份，否则 compose pull 必失败（应用镜像本来就来自 ACR）。
+# 完整步骤、验收与排障：infra/docs/deploy.md
+# =============================================================================
+name: 部署到阿里云 ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "ping=验接线 / bootstrap=初始化服务器 / deploy=发布"
+        type: choice
+        options: [deploy, bootstrap, ping]
+        default: deploy
+  push:
+    tags: ["v*"]
+
+# 部署不能并发：两个 job 同时 up -d 会互相踩（后一个把前一个刚建的容器又重建）
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MODE: ${{ inputs.mode || 'deploy' }}
+  REMOTE_DIR: /srv/pa
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 归一化镜像地址：把 ALIYUN_ACR_REGISTRY 统一成
+  #   ci_registry  = 公网域名 + 命名空间/仓库（CI 推送用；runner 在海外）
+  #   vpc_registry = VPC 域名 + 同一路径（服务器拉取用；同地域免流量费）
+  # 于是**无论** Secrets 里填的是公网还是 VPC 地址、带不带仓库路径，都能跑通。
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: 归一化 ACR 地址
+    runs-on: ubuntu-latest
+    outputs:
+      ci_registry: ${{ steps.n.outputs.ci_registry }}
+      ci_host: ${{ steps.n.outputs.ci_host }}
+    steps:
+      - id: n
+        name: 派生公网（推送）与 VPC（拉取）两个地址
+        run: |
+          set -euo pipefail
+          raw='${{ secrets.ALIYUN_ACR_REGISTRY }}'
+          raw="${raw%/}"                       # 去尾斜杠
+          host="${raw%%/*}"                    # 第一段 = 域名
+          path="${raw#"$host"}"                # 其余 = /命名空间/仓库（可能为空）
+          # 兜底：只填了域名时补默认仓库路径（本项目实际使用的 ACR 路径）
+          [ -n "${path}" ] || path="/lihaixing-docker-image-rep/application_assistant"
+          # 统一成"公网域名"（去掉 -vpc），再派生 VPC 域名
+          pub_host="${host/-vpc.cn-shanghai.personal.cr.aliyuncs.com/.cn-shanghai.personal.cr.aliyuncs.com}"
+          vpc_host="${pub_host/.cn-shanghai.personal.cr.aliyuncs.com/-vpc.cn-shanghai.personal.cr.aliyuncs.com}"
+          echo "ci_registry=${pub_host}${path}"  >> "$GITHUB_OUTPUT"
+          echo "ci_host=${pub_host}"             >> "$GITHUB_OUTPUT"
+          echo "推送地址（CI）：${pub_host}${path}"
+          echo "拉取地址（ECS）：${vpc_host}${path}"
+
+  # ---------------------------------------------------------------------------
+  # 构建并推送 5 个应用镜像（tag = <模块>-<git sha>）
+  #   · mobile-h5 的构建上下文是**仓库根**（@pa/core → ../frontend/src，见其 Dockerfile 注释）
+  #   · pip/npm 源显式覆盖为官方源：镜像默认走国内源（本地构建快），runner 在海外反而慢
+  #   · cache-from/to: gha —— 二次构建只推变化的层（跨境推送是这条流水线的瓶颈）
+  # ---------------------------------------------------------------------------
+  build-push:
+    name: 构建并推送 ${{ matrix.name }}
+    needs: prepare
+    if: ${{ github.event_name == 'push' || inputs.mode == 'deploy' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: backend,   context: backend-api, dockerfile: backend-api/Dockerfile }
+          - { name: ai-engine, context: ai-engine,   dockerfile: ai-engine/Dockerfile }
+          - { name: frontend,  context: frontend,    dockerfile: frontend/Dockerfile }
+          - { name: mobile-h5, context: .,           dockerfile: mobile-h5/Dockerfile }
+          - { name: portfolio, context: portfolio,   dockerfile: portfolio/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ needs.prepare.outputs.ci_host }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ needs.prepare.outputs.ci_registry }}:${{ matrix.name }}-${{ github.sha }}
+          build-args: |
+            PIP_INDEX_URL=https://pypi.org/simple
+            PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+            NPM_REGISTRY=https://registry.npmjs.org
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # ---------------------------------------------------------------------------
+  # 第三方基础镜像转推 ACR（服务器连不上 Docker Hub，必须先在 ACR 里有一份）
+  # 命名与 compose 里的引用一致：<registry>:redis-7.4-alpine
+  # ---------------------------------------------------------------------------
+  mirror-images:
+    name: 转推基础镜像 redis:7.4-alpine
+    needs: prepare
+    if: ${{ github.event_name == 'push' || inputs.mode == 'deploy' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉公网镜像 → 重打 tag → 推 ACR
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "${ACR_PASSWORD}" | docker login -u "${ACR_USERNAME}" --password-stdin '${{ needs.prepare.outputs.ci_host }}'
+          src="redis:7.4-alpine"
+          dst='${{ needs.prepare.outputs.ci_registry }}:redis-7.4-alpine'
+          docker pull "${src}"
+          docker tag "${src}" "${dst}"
+          docker push "${dst}"
+
+  # ---------------------------------------------------------------------------
+  # 部署：SSH 到 ECS（三种 mode 在同一个 job 内分支，避免多套 SSH 配置重复）
+  #   用 ~/.ssh/pa_deploy 这个 ssh config 别名统一承载连接参数：
+  #   后续 ssh / rsync 都只写 `pa-deploy`，参数不会散落在十几处命令里。
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: 部署（mode=${{ inputs.mode || 'deploy' }}）
+    needs: [prepare, build-push, mirror-images]
+    # ping/bootstrap 模式下 build-push 与 mirror-images 会被**跳过**（result=skipped），
+    # 所以这里用 "!= failure" 表达"只要构建没失败就继续"。
+    if: ${{ !cancelled() && needs.build-push.result != 'failure' && needs.mirror-images.result != 'failure' }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+      ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+      IMAGE_TAG: ${{ github.sha }}
+      VPC_REGISTRY: ${{ needs.prepare.outputs.vpc_registry }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 SSH（私钥 + 连接别名）并做连通性自检
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          # 私钥经 printf 落盘（不 echo，避免特殊字符被解释）；权限必须 600，否则 ssh 直接拒绝
+          printf '%s\n' '${{ secrets.SSH_PRIVATE_KEY }}' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat > ~/.ssh/pa_deploy <<EOF
+          Host pa-deploy
+            HostName ${SSH_HOST}
+            Port ${SSH_PORT}
+            User ${SSH_USER}
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+            UserKnownHostsFile ~/.ssh/known_hosts
+            ServerAliveInterval 15
+            ConnectTimeout 15
+          EOF
+          chmod 600 ~/.ssh/pa_deploy
+          echo "== 连通性自检 =="
+          ssh -F ~/.ssh/pa_deploy pa-deploy 'whoami; hostname'
+
+      # rsync 只同步"编排与迁移"这两块，**不同步整个仓库**：
+      #   · 服务器不需要应用源码（源码在镜像里）；
+      #   · 服务器也不需要 git（实测国内拉 github.com 不稳定），部署完全由 CI 推送驱动；
+      #   · --exclude 同时保护服务器侧文件不被 --delete 删掉（.env / 备份 / 证书 / ACME 目录）。
+      - name: 同步编排文件（infra/ 与 database/；ping 模式跳过）
+        if: env.MODE != 'ping'
+        run: |
+          set -euo pipefail
+          RSYNC_SSH="ssh -F ${HOME}/.ssh/pa_deploy"
+          EXCLUDES=(--exclude='.env' --exclude='backups/' --exclude='nginx/certs/' --exclude='nginx/www/')
+          rsync -az --delete "${EXCLUDES[@]}" -e "${RSYNC_SSH}" infra/ "pa-deploy:${REMOTE_DIR}/infra/"
+          rsync -az --delete -e "${RSYNC_SSH}" database/ "pa-deploy:${REMOTE_DIR}/database/"
+          echo "== 已同步（服务器侧受保护项：infra/.env、infra/backups、infra/nginx/certs、infra/nginx/www）=="
+
+      # --- 模式一：ping —— 只读验证"密钥接线 + 服务器现状"（首次接入时先点这个）---
+      # 刻意**不做任何写操作**：连 rsync 都跳过。用来回答三个问题：
+      #   ① 私钥/用户名/端口对不对？ ② Docker 装了吗？ ③ 部署目录与证书到位了吗？
+      - name: ping（只读自检）
+        if: env.MODE == 'ping'
+        run: |
+          ssh -F ~/.ssh/pa_deploy pa-deploy 'bash -s' <<'REMOTE'
+          echo "== 身份 =="; whoami; hostname; id -u
+          echo; echo "== 系统 =="; . /etc/os-release && echo "$PRETTY_NAME"; nproc
+          free -m | head -2; df -h / | tail -1
+          echo; echo "== swap =="; swapon --show 2>/dev/null || echo NO_SWAP
+          echo; echo "== 软件 =="
+          docker --version 2>/dev/null || echo NO_DOCKER
+          docker compose version --short 2>/dev/null || echo NO_COMPOSE
+          psql --version 2>/dev/null || echo NO_PSQL
+          rsync --version 2>/dev/null | head -1 || echo NO_RSYNC
+          echo; echo "== 部署目录 =="
+          ls -la /srv/pa 2>/dev/null || echo NO_DEPLOY_DIR
+          echo; echo "== 关键文件 =="
+          [ -f /srv/pa/infra/.env ] && echo "infra/.env    : 已存在" || echo "infra/.env    : 缺失（见 docs §4）"
+          [ -f /srv/pa/infra/nginx/certs/fullchain.pem ] && echo "证书          : 已存在" || echo "证书          : 缺失（mode=bootstrap 会补自签兜底）"
+          echo; echo "== 容器 =="
+          docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true
+          REMOTE
+
+      # --- 模式二：bootstrap —— 系统层一次性初始化（幂等，可反复跑）---
+      - name: bootstrap（安装 swap/Docker/PostgreSQL 并生成自签证书兜底）
+        if: env.MODE == 'bootstrap'
+        run: |
+          ssh -F ~/.ssh/pa_deploy pa-deploy "cd ${REMOTE_DIR} && ./infra/scripts/prod-bootstrap.sh"
+
+      # --- 模式三：deploy —— 发布（迁移 → 拉镜像 → 起栈 → 重载边缘 → 验收）---
+      - name: 部署（tag=${{ github.sha }}）
+        if: env.MODE == 'deploy'
+        run: |
+          set -euo pipefail
+          # ① 凭据经 **stdin** 写入服务器临时文件（不进命令行 → 不进 ps / 不进 CI 日志），
+          #    prod-deploy.sh 读完立即删除；权限 600 由远端 umask 保证。
+          printf 'ACR_USERNAME=%s\nACR_PASSWORD=%s\n' "${ACR_USERNAME}" "${ACR_PASSWORD}" \
+            | ssh -F ~/.ssh/pa_deploy pa-deploy "umask 077; cat > ${REMOTE_DIR}/.acr-creds"
+          # ② 对齐检查（不阻断）：CI 派生的拉取地址应与服务器 infra/.env 里的一致
+          remote_registry="$(ssh -F ~/.ssh/pa_deploy pa-deploy "grep -E '^PA_IMAGE_REGISTRY=' ${REMOTE_DIR}/infra/.env | cut -d= -f2-")"
+          echo "服务器 infra/.env ：${remote_registry}"
+          echo "CI 派生（VPC）    ：${VPC_REGISTRY}"
+          [ "${remote_registry}" = "${VPC_REGISTRY}" ] || echo "::warning::两者不一致 —— 服务器会用 infra/.env 里的地址拉镜像（若拉取失败请核对 docs §10）"
+          # ③ 发布（脚本内含：迁移 → pull → up → edge reload → prod-verify 验收）
+          ssh -F ~/.ssh/pa_deploy pa-deploy "cd ${REMOTE_DIR} && ./infra/scripts/prod-deploy.sh '${IMAGE_TAG}'"
+
+      # 把结果写进 Actions 摘要页：部署完一眼能看到版本号与回滚命令
+      - name: 部署摘要
+        if: always() && env.MODE != 'ping'
+        run: |
+          {
+            echo "### ProductAssistant 部署（mode=${MODE}）"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 镜像 tag | \`${IMAGE_TAG}\` |"
+            echo "| 目标主机 | \`${SSH_HOST}\` |"
+            echo "| 结果 | ${{ job.status }} |"
+            echo ""
+            echo "回滚（在服务器上）：\`/srv/pa/infra/scripts/prod-deploy.sh --rollback\`"
+            echo ""
+            echo "验收：\`/srv/pa/infra/scripts/prod-verify.sh\`　·　排障：\`infra/docs/deploy.md §10\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
+

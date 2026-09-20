@@ -1,0 +1,331 @@
+# =============================================================================
+# ProductAssistant | infra/docker-compose.prod.yml
+# 用途 : 生产编排（阿里云 ECS 单机）—— 边缘 nginx + 三个静态站点 + backend-api
+#        + ai-engine + Redis（生产参数）+ Milvus 组（**可选 profile**）
+# 使用 : docker compose --env-file infra/.env -f infra/docker-compose.prod.yml up -d
+#        （首次初始化 bootstrap、数据库迁移、TLS 证书、日常发布与回滚：
+#          见 infra/docs/deploy.md —— 那份文档与本文的变量/服务名逐一对应）
+# 镜像 : 全部来自阿里云 ACR：${PA_IMAGE_REGISTRY}:<模块>-${PA_IMAGE_TAG}
+#        · PA_IMAGE_REGISTRY 在服务器上取 **VPC 域名**（同地域免公网流量费）
+#        · 不在服务器构建：本机实测 2 vCPU / 1608MB 内存，`vite build`/`pip install`
+#          会 OOM；构建统一在 GitHub Actions 完成（见 docs/deploy.md §1）
+#
+# 三条硬约束（改错即出事，改前请读 docs/deploy.md 的"关键取舍"）:
+#   1) **内部服务一律不写 ports** —— Docker 发布端口会自行写 iptables 的 DOCKER 链，
+#      **绕过 ufw/iptables 规则**；所以"只开 80/443"只能靠「不写 ports + 安全组」保证，
+#      不能靠主机防火墙。唯一写 ports 的是 edge。
+#   2) PostgreSQL 按仓库原则跑在**宿主机**（不在容器）→ 应用经 host.docker.internal
+#      回宿主，必须给 backend/ai-engine 加 `extra_hosts: host.docker.internal:host-gateway`
+#      （Linux 的 Docker 默认**没有**这个域名，漏了就是"容器里连不上数据库"）。
+#   3) Milvus 组挂在 `rag` profile 下 → 默认**不启动**（2GB 内存装不下，起了就是 OOM
+#      反复重启并把 backend/ai-engine 一起拖死）。未启用时 ai-engine 自动降级：
+#      MILVUS_URI 留空 → RAG 关闭、主链路完整（adapters/milvus_rag_store.py 的设计）。
+#      升配后再 `--profile rag up -d`（启用前需先把三个镜像推一份到 ACR，
+#      因为本机实测 **registry-1.docker.io 直连超时**，见 docs/deploy.md §6）。
+#
+# 内存 : 每个服务都有 mem_limit —— 单机内存靠容器上限兜底，避免任一服务失控拖垮全栈。
+#        实测可用内存约 1.1GB，全栈常驻约 0.7~0.9GB；limits 是"防失控上限"而非预期占用。
+# =============================================================================
+name: productassistant-prod
+
+services:
+  # ---------------------------------------------------------------------------
+  # 一、边缘：唯一对外暴露端口的容器（TLS 终结 / 路径分流 / /api 反代）
+  # ---------------------------------------------------------------------------
+  edge:
+    image: nginx:1.27-alpine
+    container_name: pa-edge
+    ports:
+      - "${EDGE_HTTP_PORT:-80}:80"
+      - "${EDGE_HTTPS_PORT:-443}:443"
+    volumes:
+      # 主配置与站点配置只读挂载（改配置：改仓库文件 → rsync → nginx -s reload）
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # 证书目录：fullchain.pem / privkey.pem（不入库，由 certbot 或 bootstrap 自签生成）
+      - ./nginx/certs:/etc/nginx/certs:ro
+      # ACME HTTP-01 挑战文件目录（certbot --webroot -w <宿主 ./nginx/www>）
+      - ./nginx/www:/var/www/certbot
+    networks: [pa-internal]
+    mem_limit: 64m
+    restart: unless-stopped
+    healthcheck:
+      # 只证明"nginx 活着"：探针打的是 80 端口的静态返回，不碰任何后端
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/__edge_health | grep -q ok"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    # ⚠️ 这里必须用**长格式 + service_healthy**（不是短格式的容器启动即可）：
+    #   nginx 在**配置解析时**就要解析 upstream 域名，名字还不存在时直接 `[emerg] host not
+    #   found in upstream` 退出（实测：standalone `nginx -t` 就是这个报错）。等上游 healthy
+    #   才启动 edge，既保证名字可解析，也避免"边缘先起、上游还没就绪"这段窗口。
+    # ⚠️ 另一个相关陷阱（运维必读，见 infra/docs/deploy.md §6）：
+    #   nginx 把 upstream 解析结果**缓存在内存里**，而每次发布后端容器会被重建并**换新 IP**。
+    #   所以 deploy 流程在 `up -d` 之后必须执行一次 `docker compose exec -T edge nginx -s reload`
+    #   （reload 会重新解析域名）—— 否则边缘会一直把请求打到已经消失的旧 IP，表现为持续 502。
+    depends_on:
+      frontend:
+        condition: service_healthy
+      mobile-h5:
+        condition: service_healthy
+      portfolio:
+        condition: service_healthy
+      backend-api:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # 二、三个静态站点（nginx:alpine；镜像内自带 SPA 回退与缓存策略）
+  #     都不写 ports —— 只经 edge 访问；32m 上限足够（纯静态，无动态进程）
+  # ---------------------------------------------------------------------------
+  frontend:
+    image: ${PA_IMAGE_REGISTRY}:frontend-${PA_IMAGE_TAG:-latest}
+    container_name: pa-frontend
+    networks: [pa-internal]
+    mem_limit: 32m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/__healthz | grep -q ok"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  mobile-h5:
+    image: ${PA_IMAGE_REGISTRY}:mobile-h5-${PA_IMAGE_TAG:-latest}
+    container_name: pa-mobile-h5
+    networks: [pa-internal]
+    mem_limit: 32m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/__healthz | grep -q ok"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  portfolio:
+    image: ${PA_IMAGE_REGISTRY}:portfolio-${PA_IMAGE_TAG:-latest}
+    container_name: pa-portfolio
+    networks: [pa-internal]
+    mem_limit: 32m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/__healthz | grep -q ok"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # 三、backend-api：业务 API 网关（FastAPI + 4 个常驻任务 + SSE）
+  #     env_file: ./.env  = infra/.env（生产密钥只在服务器上，不入库、不进 CI 日志）
+  # ---------------------------------------------------------------------------
+  backend-api:
+    image: ${PA_IMAGE_REGISTRY}:backend-${PA_IMAGE_TAG:-latest}
+    container_name: pa-backend
+    env_file: [./.env]
+    # 见文件头约束 2：宿主 PG 经网关别名访问
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [pa-internal]
+    mem_limit: 512m
+    restart: unless-stopped
+    # 优雅停机：等 uvicorn 关掉 SSE 长连接与常驻任务（正常 <5s，留 30s 余量）
+    stop_grace_period: 30s
+    healthcheck:
+      # 存活探针打 /healthz（不查依赖）：查依赖会让 PG 抖动演变成容器反复重启
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # 四、ai-engine：LangGraph worker（消费 job:*/投递 result 与 evt）
+  #     无 ports（纯出站消费）；stop_grace_period 较长 —— 它要退出消费循环并释放连接池
+  # ---------------------------------------------------------------------------
+  ai-engine:
+    image: ${PA_IMAGE_REGISTRY}:ai-engine-${PA_IMAGE_TAG:-latest}
+    container_name: pa-ai-engine
+    env_file: [./.env]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [pa-internal]
+    mem_limit: 512m
+    restart: unless-stopped
+    # 单个生成任务可能跑几十秒；给它足够时间做完再退出，避免每次发布都硬杀
+    stop_grace_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # 五、Redis：事件总线 / 缓存 / 锁（backend ↔ ai-engine 的**唯一业务通道**）
+  #     参数取自 infra/docker-compose.redis-prod.yml（那份是"独立部署"变体，
+  #     本文件内联同一份口径，避免生产依赖两个 compose 文件的启动顺序）
+  #     ⚠️ REDIS_MAXMEMORY 在 1.6GB 内存的机器上必须 ≤ 256mb（本文件默认 256mb）：
+  #        它 > mem_limit 时 Redis 会在达到容器上限时被内核杀，而不是按 maxmemory 淘汰。
+  #     服务名固定为 redis → 应用侧 REDIS_URL 用 redis://:<pwd>@redis:6379/0
+  # ---------------------------------------------------------------------------
+  redis:
+    image: ${PA_IMAGE_REGISTRY}:redis-7.4-alpine
+    container_name: pa-redis-prod
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?生产 Redis 必须设置 REDIS_PASSWORD（见 infra/.env.template）}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      # 队列与事件流**绝不能被淘汰**：allkeys-lru 会在内存吃紧时静默丢任务；
+      # 宁可 XADD 写失败（上游立刻可见、可告警）也不要静默丢消息。
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - ${REDIS_APPENDFSYNC:-everysec}
+      # 队列实例上这几条没有任何正当用途，误调用一次即全量丢数据 → 直接改名封禁
+      - --rename-command
+      - FLUSHALL
+      - ""
+      - --rename-command
+      - FLUSHDB
+      - ""
+      - --rename-command
+      - CONFIG
+      - ""
+      - --rename-command
+      - KEYS
+      - ""
+    environment:
+      # 仅供 healthcheck 使用（容器的环境变量，不写进命令行历史）
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    volumes:
+      # 持久化必须挂载：容器重建后队列与事件流不能凭空消失
+      - redisproddata:/data
+    networks: [pa-internal]
+    # 故意不声明 ports（见文件头约束 1）
+    mem_limit: 384m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # 六、Milvus 组（RAG 向量召回）—— **可选 profile: rag**，2C2G 默认不启动
+  #     启用前置条件（两件都要满足，否则一定失败）:
+  #       ① 内存 ≥ 4GB（standalone 起步 ~1.5GB；本机 1.6GB 直接 OOM）
+  #       ② 三个镜像已在 ACR 里有一份（本机实测 registry-1.docker.io 直连超时），
+  #          做法见 infra/docs/deploy.md §6；然后把下面三处 image 改成：
+  #             ${PA_IMAGE_REGISTRY}:etcd-v3.5.5 / minio-<ver> / milvus-v2.6.1
+  #     启用命令: docker compose --env-file infra/.env -f infra/docker-compose.prod.yml \
+  #                 --profile rag up -d          # 集合初始化由 milvus-init 一次性完成
+  # ---------------------------------------------------------------------------
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: pa-etcd
+    profiles: ["rag"]
+    # etcd = Milvus 的元数据协调层；配额 4GB，自动压缩保留 1000 个修订
+    command:
+      - etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd-data
+      - --auto-compaction-mode=revision
+      - --auto-compaction-retention=1000
+      - --quota-backend-bytes=4294967296
+    volumes:
+      - etcddata:/etcd-data
+    networks: [pa-internal]
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: pa-minio
+    profiles: ["rag"]
+    environment:
+      # ⚠️ 凭据必须与 Milvus 侧透传的一致：不一致时表现为「Milvus 容器起得来但
+      #    healthcheck 永远 unhealthy」或写入报错，属极难排查的一类问题（实测踩过）
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Milvus 组需要 MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Milvus 组需要 MINIO_ROOT_PASSWORD}
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - miniodata:/minio_data
+    networks: [pa-internal]
+    mem_limit: 384m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  milvus:
+    image: milvusdb/milvus:v2.6.1
+    container_name: pa-milvus
+    profiles: ["rag"]
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: "etcd:2379"
+      MINIO_ADDRESS: "minio:9000"
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
+    volumes:
+      - milvusdata:/var/lib/milvus
+    networks: [pa-internal]
+    mem_limit: 1024m
+    restart: unless-stopped
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # 集合初始化（一次性）：复用 ai-engine 镜像（里面就装了 pymilvus），
+  # 挂载仓库的 database/ 目录跑 init_collections.py —— 该脚本**幂等**（集合已存在则跳过）。
+  # 启用 rag profile 时随栈一起跑；没启用时它也不会被创建（同 profile）。
+  milvus-init:
+    image: ${PA_IMAGE_REGISTRY}:ai-engine-${PA_IMAGE_TAG:-latest}
+    container_name: pa-milvus-init
+    profiles: ["rag"]
+    working_dir: /db
+    command: ["python", "milvus/init_collections.py", "--uri", "http://milvus:19530", "--dim", "${MILVUS_DIM:-1024}"]
+    volumes:
+      - ../database:/db:ro
+    networks: [pa-internal]
+    restart: "no"
+    depends_on:
+      milvus:
+        condition: service_healthy
+
+volumes:
+  # Redis 生产数据（与 infra/docker-compose.redis-prod.yml 同名同语义）
+  redisproddata:
+    name: pa-redisproddata
+  # Milvus 组：与开发库同名，因为单机部署下不会同时存在 dev 与 prod 两套 Milvus
+  etcddata:
+    name: pa-etcddata
+  miniodata:
+    name: pa-miniodata
+  milvusdata:
+    name: pa-milvusdata
+
+networks:
+  # 仅本 compose 使用；应用端口不对宿主/公网暴露（见文件头约束 1）
+  pa-internal:
+    name: pa-internal
+    driver: bridge
+
