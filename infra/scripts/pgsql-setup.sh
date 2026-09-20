@@ -20,6 +20,11 @@ SQL_DIR="${ROOT_DIR}/database/sql"
 set -a; . "$ENV_FILE"; set +a
 
 PGHOST="${PGHOST:-${POSTGRES_HOST:-127.0.0.1}}"
+# 生产部署下的坑（2026-09 实测）：infra/.env 里 POSTGRES_HOST=host.docker.internal ——
+# 那是**容器视角**的宿主别名（容器经它回连宿主 PG）；而本脚本跑在**宿主机**上，
+# 该域名在宿主不存在 → pg_isready 直接失败。这里回退到 127.0.0.1（同一个宿主实例）。
+# 容器视角只影响应用拼 DSN，不应影响宿主侧管理脚本。
+case "$PGHOST" in host.docker.internal) PGHOST=127.0.0.1 ;; esac
 PGPORT="${POSTGRES_PORT:-5432}"
 DB_NAME="${POSTGRES_DB:-productassistant}"
 SUPERUSER="${POSTGRES_USER:-postgres}"

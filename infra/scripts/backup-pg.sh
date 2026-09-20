@@ -25,6 +25,9 @@ set -a; . "${ENV_FILE}"; set +a
 
 DB_NAME="${POSTGRES_DB:-productassistant}"
 PGHOST_="${PGHOST:-${POSTGRES_HOST:-127.0.0.1}}"
+# 与 pgsql-setup.sh 同一处坑：生产 .env 的 POSTGRES_HOST 是**容器视角**的
+# host.docker.internal，而本脚本跑在宿主机上 → 回退 127.0.0.1。
+case "${PGHOST_}" in host.docker.internal) PGHOST_=127.0.0.1 ;; esac
 PGPORT_="${POSTGRES_PORT:-5432}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT="${BACKUP_DIR}/pa-${STAMP}.dump"

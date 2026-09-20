@@ -67,7 +67,9 @@ else
 fi
 
 step "2/5 数据库迁移（幂等，forward-only）"
-./infra/scripts/pgsql-setup.sh init
+# PGHOST 显式指向宿主回环：生产 .env 的 POSTGRES_HOST 是**容器视角**的 host.docker.internal，
+# 而本脚本跑在宿主机上（pgsql-setup.sh/backup-pg.sh 内部也有同样的回退，这里是双保险）。
+PGHOST=127.0.0.1 ./infra/scripts/pgsql-setup.sh init
 
 step "3/5 拉取镜像（tag=${TAG}）"
 PA_IMAGE_TAG="${TAG}" "${COMPOSE[@]}" pull
