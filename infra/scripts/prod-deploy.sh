@@ -17,6 +17,9 @@
 #   5) edge reload    —— ⚠️ 关键一步：nginx 把 upstream 的解析结果**缓存在内存**，
 #                        而第 4 步会把 backend 容器**重建并换新 IP** → 不 reload 就一直 502；
 #                        这里 reload 会重新解析域名（零停机）。
+#   ※ 另有一步**不编号**（在第 5 步之后、验收之前）：跑一次「证书有效期自检」——
+#      阿里云免费证书只有 90 天，且 bootstrap 的自签兜底证书有 10 年有效期（靠"到期"永远发现不了），
+#      所以每次发布都查一遍"是否自签 / 剩余多少天"，只打 ::warning::、**不影响发布结论**（docs §7.5）。
 # 最后 : prod-verify.sh 做端到端验收（不通过则退出码非 0）+ 写 .deploy-tag 作为回滚锚点。
 # =============================================================================
 set -euo pipefail
@@ -106,6 +109,17 @@ if ! "${COMPOSE[@]}" exec -T edge nginx -s reload; then
   exit 1
 fi
 log "edge 已 reload（异步生效；随后的验收会在重试窗口内等它）"
+
+step "证书有效期自检（只告警；不影响发布结论 —— 换证见 infra/docs/deploy.md §7.5）"
+# 为什么要跟发布一起跑：阿里云免费证书只有 90 天，而过期/自签都不会让"容器健康检查"变红，
+# 唯一的表现是浏览器告警（甚至钉钉/微信内置浏览器直接拒绝）。把提醒放进每次发布的日志里，
+# 是最不依赖人的做法。判据与处置见 check-cert-expiry.sh 的头部注释。
+if ! cert_out="$(./infra/scripts/check-cert-expiry.sh --warn-days 21 2>&1)"; then
+  printf '%s\n' "${cert_out}"
+  echo "::warning::edge 证书需要处理（自签 或 剩余<21 天）—— 用 infra/scripts/install-cert.sh 换证（docs §7.5）"
+else
+  printf '%s\n' "${cert_out}"
+fi
 
 step "验收（走回环 + Host 头验证 nginx→应用全链路；最多 6 次、间隔 5s）"
 # 为什么要重试：起栈后容器是"刚重建"的状态，edge 的 upstream 也需要一个重载生效窗口。

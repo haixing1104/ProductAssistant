@@ -5,3 +5,13 @@ infra/backups
 **/__pycache__
 **/.pytest_cache
 node_modules
+
+# 证书类文件绝不进构建上下文：仓库根是 mobile-h5 的构建上下文（deploy.yml 矩阵里 context: .），
+# 当前 mobile-h5/Dockerfile 是精确 COPY（不 COPY . .），但这几行是"改变量式防线"——
+# 万一将来谁改成 `COPY . .`，也能挡住私钥被烤进镜像并推到 ACR（2026-09-20 实际排查过这条路径）
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.zip
