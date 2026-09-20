@@ -24,6 +24,11 @@
 #   返回 000）—— compose 里直接引用的第三方镜像（redis、以及 edge 用的 nginx）必须先在
 #   ACR 里有一份，否则 `docker compose pull` 必失败。注意：**即使宿主本地已有同名缓存也会
 #   失败**（pull 一定会去问 registry），而 prod-deploy.sh 是 set -e，会卡死在 3/5 步。
+# 为什么推送一律用裸 docker push（而不是 buildx --push）:
+#   2026-09-20 实测：buildx 默认带 provenance 证明 → 推上去的是 **OCI 索引**（含一个
+#   platform=unknown/unknown 的证明清单），ACR 个人版直接拒绝，报 `denied: unknown manifest`
+#   （5 个应用镜像全挂；而同一 run 里用裸 docker push 转推的 redis/nginx 成功）。
+#   所以：buildx 只负责**构建**（load 进本地 docker），推送统一交给 docker CLI。
 # 完整步骤、验收与排障：infra/docs/deploy.md
 # =============================================================================
 name: 部署到阿里云 ECS
@@ -67,6 +72,10 @@ jobs:
   #   · mobile-h5 的构建上下文是**仓库根**（@pa/core → ../frontend/src，见其 Dockerfile 注释）
   #   · pip/npm 源显式覆盖为官方源：镜像默认走国内源（本地构建快），runner 在海外反而慢
   #   · cache-from/to: gha —— 二次构建只推变化的层（跨境推送是这条流水线的瓶颈）
+  #   · 推**不用** buildx 的 --push：build-push-action 默认带 provenance 证明 → buildx 推的是
+  #     OCI 索引（内含 platform=unknown/unknown 的证明清单），ACR 个人版会报
+  #     `denied: unknown manifest`。改为 `load: true` + 裸 `docker push`（Docker v2 单清单）——
+  #     与下面 mirror-images 的转推走同一条路径（那条路径 2026-09-20 实测是通的）。
   # ---------------------------------------------------------------------------
   build-push:
     name: 构建并推送 ${{ matrix.name }}
@@ -112,12 +121,21 @@ jobs:
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
         run: echo "${ACR_PASSWORD}" | docker login -u "${ACR_USERNAME}" --password-stdin "${ACR_CI_HOST}"
 
-      - name: 构建并推送
+      - name: 构建（只装进 runner 的 docker，不直接推）
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          push: true
+          # ⚠️ 这里**不用** buildx 的 `push: true`（2026-09-20 实测：它在 ACR 个人版上必失败，
+          #   报 `denied: unknown manifest`）。原因：build-push-action 默认带 provenance 证明，
+          #   buildx 会因此把输出从「单清单」升级成 **OCI 索引**（索引里还有一个
+          #   platform=unknown/unknown 的证明清单）——ACR 个人版不接受这种清单。
+          #   同一个 run 里"转推基础镜像"用**裸 docker push** 是成功的 → 我们就统一走那条路径：
+          #   先 `load` 进本地 docker，下一步再用 `docker push` 推（Docker v2 单清单）。
+          load: true
+          push: false
+          provenance: false           # 关掉证明/SBOM（它们在 load 路径上本来就会被丢掉）
+          sbom: false
           tags: ${{ steps.acr.outputs.ci_registry }}:${{ matrix.name }}-${{ github.sha }}
           build-args: |
             PIP_INDEX_URL=https://pypi.org/simple
@@ -125,6 +143,16 @@ jobs:
             NPM_REGISTRY=https://registry.npmjs.org
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      # 推送到 ACR —— 与 mirror-images 里"转推基础镜像"用的是**同一条路径**（裸 docker push）。
+      # 为什么不用 buildx 的 --push：见上面那段注释（ACR 个人版对 OCI 索引/证明清单报
+      # `denied: unknown manifest`）。裸 docker push 推的是 Docker v2 单清单，实测可行。
+      - name: 推送到 ACR
+        env:
+          IMAGE: ${{ steps.acr.outputs.ci_registry }}:${{ matrix.name }}-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker push "${IMAGE}"
 
   # ---------------------------------------------------------------------------
   # 第三方基础镜像转推 ACR（服务器连不上 Docker Hub，必须先在 ACR 里有一份）
