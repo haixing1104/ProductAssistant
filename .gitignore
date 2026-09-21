@@ -34,6 +34,24 @@ coverage/
 infra/nginx/certs/
 infra/nginx/www/
 
+# --- 内部文档（本地保留、**不发布**）---------------------------------------------
+# 对外只发布根 README.md（功能与核心架构设计）；下面这些是"对内"的详细文档：
+#   · 内部详细文档 README_INTERNAL.md —— 与 README.md 逐章对应，但含完整步骤与实测细节；
+#   · 各模块的原始内部文档（契约/运行/测试/部署手册）—— 已合并进 README_INTERNAL.md，
+#     原地保留一份便于随时回看。
+# 2026-09-21 起从版本库移除，并已用 git-filter-repo 重写历史（旧提交里也不再有它们）。
+# ⚠️ 新增文档前先想清楚：只要它出现在这里，就只活在开发机上。
+/README_INTERNAL.md
+/INTERVIEW_QUESTION_BANK.md
+/backend-api/README.md
+/frontend/README.md
+/mobile-h5/README.md
+/mobile-rn/README.md
+/mobile-rn/docs/
+/portfolio/README.md
+/portfolio/public/demos/pa/README.md
+/infra/docs/
+
 # --- 证书下载包与散落的私钥文件（**兜底**规则）---
 # 2026-09-20 实际踩过：阿里云控制台下载的 <订单号>_<域名>_nginx.zip 直接落在**仓库根**，
 # 包里就是私钥；而上面只忽略了 infra/nginx/certs/ 目录，一次 `git add .` 就会入库。
