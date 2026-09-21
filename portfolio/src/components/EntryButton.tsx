@@ -1,5 +1,6 @@
 import { entryUrl } from "../lib/entry";
 import type { Platform, Project } from "../types";
+import { useLang } from "./LanguageProvider";
 
 type EntryButtonProps = {
   project: Project;
@@ -36,6 +37,7 @@ const ARROW = (
 );
 
 export default function EntryButton({ project, platform, onUnsupported, className }: EntryButtonProps) {
+  const { t } = useLang();
   const label = project.demos.find((demo) => demo.platform === platform)?.label ?? platform;
   const classes = [
     "group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-ink-200 px-4 py-2 text-sm font-medium text-ink-700 transition outline-none",
@@ -49,11 +51,11 @@ export default function EntryButton({ project, platform, onUnsupported, classNam
       <button
         type="button"
         onClick={onUnsupported}
-        title="App 下载暂未开放"
-        aria-label={`开始使用：${project.name} 原生 App（当前不支持下载）`}
+        title={t.card.disabledApp}
+        aria-label={t.card.ariaStartApp(project.name)}
         className={classes}
       >
-        开始使用 App
+        {t.card.startUsingApp}
         {ARROW}
       </button>
     );
@@ -67,10 +69,10 @@ export default function EntryButton({ project, platform, onUnsupported, classNam
       href={url}
       target="_blank"
       rel="noreferrer noopener"
-      aria-label={`开始使用：打开 ${project.name} 的 ${label} 登录页`}
+      aria-label={t.card.ariaStart(project.name, label)}
       className={classes}
     >
-      开始使用
+      {t.card.startUsing}
       {ARROW}
     </a>
   );

@@ -2,11 +2,15 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 import ProjectCard from "../components/ProjectCard";
 import { demoPath } from "../lib/asset";
-import { APP_DOWNLOAD_NOTE } from "../lib/entry";
+import { STRINGS } from "../data/strings";
 import type { Project } from "../types";
 
 // 作品卡**组件级**回归：主要守标题行右侧的「开始使用」入口（跟随当前端切目标）
 // 与它带来的那次结构改动（`platform` 状态从 DemoSwitcher 提升到 ProjectCard）。
+//
+// 语言：本文件直接 `render(<ProjectCard/>)`（没有 `LanguageProvider`）—— 走 Provider 的
+// 默认值 = 中文，于是下面的中文字面量断言同时守着「无 Provider 时也不会渲染出空白 / 错语言」。
+// 真实切英文的路径由 `__tests__/langSwitch.test.tsx` 在页面级覆盖。
 //
 // 为什么构造作品对象而不是用 `data/projects.ts`：真实数据的 `links` 现在是空的
 // （演示环境未接入 = 生产现状），没有入口可断言。构造一份带链接的，才能把
@@ -89,6 +93,11 @@ describe("作品卡：「开始使用」入口跟随当前端", () => {
     const bottom = screen.getByRole("link", { name: /进入系统/ });
     expect(bottom.getAttribute("href")).toBe(link.getAttribute("href"));
     expect(bottom).toHaveAttribute("target", "_blank");
+
+    // 两个入口的**可访问名必须能区分**：底部 CTA 一旦复用标题行的 `ariaStart` 模板，
+    // 屏幕阅读器（以及用例里的按名查询）就会看到两个同名入口 —— 这条断言是那次修复的钉子。
+    expect(link).toHaveAccessibleName(STRINGS.zh.card.ariaStart(project.name, "PC Web"));
+    expect(bottom).toHaveAccessibleName(STRINGS.zh.card.ariaEnterSystem(project.name, "PC Web"));
   });
 
   it("切到 Mobile H5：标题行与底部一起换成 H5 的登录地址（不是多出一个入口）", () => {
@@ -131,7 +140,7 @@ describe("作品卡：「开始使用」入口跟随当前端", () => {
       const button = screen.getByRole("button", { name: /原生 App/ });
 
       fireEvent.click(button);
-      expect(screen.getByRole("status")).toHaveTextContent(APP_DOWNLOAD_NOTE);
+      expect(screen.getByRole("status")).toHaveTextContent(STRINGS.zh.card.toastAppDownload);
 
       act(() => {
         vi.advanceTimersByTime(3200);

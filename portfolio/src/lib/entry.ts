@@ -13,13 +13,10 @@ import type { Platform, ProjectLinks } from "../types";
  *      底部的禁用占位态（「演示环境准备中」+ 邮件联系）继续兜底。
  *
  * 原生端（`rn`）**恒为 `undefined`**：RN 是装在手机里的 App，浏览器里没有可跳的 URL。
- * 点击时页面上给 Toast（`APP_DOWNLOAD_NOTE`），而不是伪造一个下载链接。
+ * 点击时页面上给 Toast（文案在 `data/strings.ts` 的 `card.toastAppDownload` —— 文案属于字典，
+ * 本文件只留 URL 逻辑），而不是伪造一个下载链接。
  */
 export const LOGIN_PATH = "/login";
-
-/** 原生端（RN）在浏览器里没有入口时的提示文案（Toast 内容）。 */
-export const APP_DOWNLOAD_NOTE =
-  "App 下载暂未开放（Android / iOS 安装包尚未上架）；可先切到 Mobile H5 在浏览器里体验。";
 
 /** 两个端各自的基址（PC Web / Mobile H5）。 */
 export type EntryBases = { web: string; h5: string };

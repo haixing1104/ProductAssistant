@@ -7,6 +7,16 @@
 // 而不是上线后变成一个白块（这类错在静态页上没人会及时发现）。
 
 /**
+ * 界面语言（`zh` 默认 / `en`）。**页面上的每一句话都按它分两份**：
+ *   · UI 文案 → `data/strings.ts`（字典里 `en: typeof zh`，结构对齐由 `tsc --noEmit` 保证）；
+ *   · 作品内容 → `data/projects.ts`（中文，事实源）与 `data/projects.en.ts`（英文，逐条对应，
+ *     结构与「不得残留中文」由 `__tests__/projectsEn.test.ts` 保证）。
+ * 开关在首屏右上角（`components/LangSwitch.tsx`），选择由 `lib/i18n.ts` 落到 localStorage，
+ * 状态由 `components/LanguageProvider.tsx` 持有（`useLang()`）。
+ */
+export type Lang = "zh" | "en";
+
+/**
  * 演示的三个端（Tab 顺序 = `data/projects.ts` 里 demos 的顺序）。
  *
  * 为什么原生端只有一条 `rn` 而不是 Android / iOS 各一条：原生端是**一套代码两端**，

@@ -4,6 +4,7 @@ import type { KeyboardEvent } from "react";
 import { resolveClip } from "../lib/asset";
 import type { Platform, Project } from "../types";
 import DemoPlayer from "./DemoPlayer";
+import { useLang } from "./LanguageProvider";
 
 // 三端演示切换（PC Web / Mobile H5 / Mobile Native）+ 端内**分段**。
 //
@@ -24,6 +25,7 @@ type DemoSwitcherProps = {
 };
 
 export default function DemoSwitcher({ project, platform, onPlatformChange }: DemoSwitcherProps) {
+  const { t } = useLang();
   // 段用 key 记录而不是下标：将来插一段 / 调顺序，不会把访客停在"另一段"上。
   // 记录里带上"属于哪个端"，**换端即重置回第一段**由两条保障共同完成：
   //   · 点端 Tab 时顺手清空（见下面的 onClick）—— 覆盖"切走再切回"这种走回头路的情况
@@ -59,10 +61,10 @@ export default function DemoSwitcher({ project, platform, onPlatformChange }: De
   return (
     <section className="mt-8">
       <h4 className="text-xs font-medium tracking-widest text-ink-500 uppercase dark:text-ink-100/60">
-        多端演示
+        {t.demo.heading}
       </h4>
 
-      <div role="tablist" aria-label={`${project.name} 多端演示`} className="mt-3 flex flex-wrap gap-2">
+      <div role="tablist" aria-label={t.demo.platformTablistAria(project.name)} className="mt-3 flex flex-wrap gap-2">
         {project.demos.map((demo) => {
           const selected = demo.platform === current.platform;
           return (
@@ -96,7 +98,7 @@ export default function DemoSwitcher({ project, platform, onPlatformChange }: De
       {hasClips && (
         <div
           role="tablist"
-          aria-label={`${current.label} 演示分段`}
+          aria-label={t.demo.clipTablistAria(current.label)}
           className="mt-4 flex flex-wrap gap-2"
           onKeyDown={handleClipKeys}
         >
@@ -143,7 +145,10 @@ export default function DemoSwitcher({ project, platform, onPlatformChange }: De
 
       {clip?.note && (
         <p className="mt-3 text-sm text-ink-700 dark:text-ink-100/80">
-          <span className="font-medium text-ink-900 dark:text-ink-50">{clip.title}</span>：{clip.note}
+          {/* 标题加粗、分隔符走字典（全角「：」vs 半角「: 」—— 标点也是文案，不能写死在 JSX 里） */}
+          <span className="font-medium text-ink-900 dark:text-ink-50">{clip.title}</span>
+          {t.demo.clipNoteSeparator}
+          {clip.note}
         </p>
       )}
     </section>

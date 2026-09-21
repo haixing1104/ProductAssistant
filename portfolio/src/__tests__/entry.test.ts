@@ -1,4 +1,4 @@
-import { APP_DOWNLOAD_NOTE, entryBase, entryUrl, envEntryBases, joinLogin, LOGIN_PATH } from "../lib/entry";
+import { entryBase, entryUrl, envEntryBases, joinLogin, LOGIN_PATH } from "../lib/entry";
 import type { EntryBases } from "../lib/entry";
 import type { ProjectLinks } from "../types";
 
@@ -64,15 +64,13 @@ describe("joinLogin：基址 + 登录路径", () => {
   });
 });
 
-describe("默认读取点与原生端文案", () => {
+describe("默认读取点", () => {
   it("envEntryBases 返回两个字符串（测试环境不读 .env.development → 空串 = 走数据或禁用态）", () => {
     const bases = envEntryBases();
     expect(typeof bases.web).toBe("string");
     expect(typeof bases.h5).toBe("string");
   });
 
-  it("原生端的 Toast 文案：说明暂未开放，并给出替代路径（不是一句「不行」）", () => {
-    expect(APP_DOWNLOAD_NOTE).toContain("暂未开放");
-    expect(APP_DOWNLOAD_NOTE).toContain("Mobile H5");
-  });
+  // 原生端「暂未开放」的 Toast 文案已随多语言迁到 `data/strings.ts`
+  // （文案属于字典、本文件只留 URL 逻辑）—— 那条断言在 `__tests__/strings.test.ts`。
 });

@@ -1,5 +1,6 @@
 import { isPortrait, publicFile, resolveDemoSource } from "../lib/asset";
 import type { DemoClip } from "../types";
+import { useLang } from "./LanguageProvider";
 
 type DemoPlayerProps = {
   /** 当前生效的这一段；`undefined` = 这一端还没录（渲染占位卡）。 */
@@ -20,6 +21,7 @@ type DemoPlayerProps = {
 //   · 手机截图 493×854 是竖屏，套 16:9 会被压成"矮胖"，文字糊成一团。
 // 竖屏端再加 `demo-frame--phone` 收窄居中（见 styles/app.css）。
 export default function DemoPlayer({ clip, label, aspect, note }: DemoPlayerProps) {
+  const { t } = useLang();
   const source = resolveDemoSource(clip ?? { note });
   const frameClass = `demo-frame mt-4${isPortrait(aspect) ? " demo-frame--phone" : ""}`;
 
@@ -53,7 +55,7 @@ export default function DemoPlayer({ clip, label, aspect, note }: DemoPlayerProp
         <img
           className="h-full w-full object-contain"
           src={publicFile(source.src)}
-          alt={`${clip?.title ?? label} 演示`}
+          alt={t.demo.clipAlt(clip?.title ?? label)}
           loading="lazy"
         />
       </div>
@@ -70,9 +72,7 @@ export default function DemoPlayer({ clip, label, aspect, note }: DemoPlayerProp
         {label}
       </span>
       <p className="max-w-md text-sm text-ink-700 dark:text-ink-100/80">{source.note}</p>
-      <p className="text-xs text-ink-500 dark:text-ink-100/50">
-        资产就位后此处自动替换为演示动图 / 视频
-      </p>
+      <p className="text-xs text-ink-500 dark:text-ink-100/50">{t.demo.placeholderHint}</p>
     </div>
   );
 }

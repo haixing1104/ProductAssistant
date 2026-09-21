@@ -1,8 +1,11 @@
 import { demoPath } from "../lib/asset";
-import type { Project } from "../types";
+import type { Lang, Project } from "../types";
+import { projectsEn } from "./projects.en";
 
 // =============================================================================
-// 作品合集（**唯一内容事实源**）
+// 作品合集（**唯一内容事实源**，中文版）
+// 英文版在 `projects.en.ts`：两者**逐条对应**，结构对齐与「英文版不得残留中文」由
+// `__tests__/projectsEn.test.ts` 守着；页面按语言经 `projectsFor(lang)` 取（见文件末尾）。
 //
 // 加一个新作品：复制下面一个对象 → 改 slug/name/tagline/… → 建 `public/demos/<slug>/` 目录。
 // 页面（卡片、三端演示切换、进入系统按钮）全部由这份数据驱动，不需要改任何组件。
@@ -152,4 +155,23 @@ export const projects: Project[] = [
 //
 //   video: demoPath("pa", "web", "01-list", "mp4"),
 //   poster: demoPath("pa", "web", "01-list", "webp"),
+
+
+// ── 按语言取作品集（页面只认这个入口）──────────────────────────────────────
+//
+// 两种语言的**结构**（数量 / slug / demos 顺序 / clip key 顺序 / 素材路径 / links / stack）
+// 由 `__tests__/projectsEn.test.ts` 逐条比对 —— 谁只改了一边，`npm test` 当场红。
+// 文案字段（name / tagline / summary / period / highlights / clip.title / clip.note / 端 note）
+// 与 `data/strings.ts` 的 UI 字典一起构成页面的全部可见文字。
+export const PROJECT_SETS: Record<Lang, Project[]> = { zh: projects, en: projectsEn };
+
+/**
+ * 按界面语言取作品集。
+ *
+ * 语言值异常（localStorage 被手改 / 未来加了新语言但这里忘了配）时**回退中文**：
+ * 页面上宁可显示一份能读的内容，也不要空白 —— 与 `lib/asset.ts` 里「比例写坏就退回 1:1」同款口径。
+ */
+export function projectsFor(lang: Lang): Project[] {
+  return PROJECT_SETS[lang] ?? projects;
+}
 

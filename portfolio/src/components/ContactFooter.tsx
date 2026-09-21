@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { contact, copyText, mailtoUrl } from "../lib/contact";
+import { useLang } from "./LanguageProvider";
 
 type CopyState = "idle" | "ok" | "fail";
 
@@ -16,6 +17,7 @@ const GITHUB_MARK = (
 // 一键复制（复制失败时明确提示手动选择，而不是静默什么都不做）、以及 GitHub 源码仓库。
 // 这里是全站**唯一**的联系方式出口：首屏与作品卡都不再重复放邮件入口。
 export default function ContactFooter() {
+  const { t } = useLang();
   const [copyState, setCopyState] = useState<CopyState>("idle");
 
   async function handleCopy() {
@@ -26,18 +28,19 @@ export default function ContactFooter() {
   }
 
   const copyLabel =
-    copyState === "ok" ? "已复制 ✓" : copyState === "fail" ? "复制失败，请手动选中" : "复制邮箱";
+    copyState === "ok" ? t.footer.copied : copyState === "fail" ? t.footer.copyFailed : t.footer.copy;
 
   return (
     <footer id="contact" className="border-t border-ink-100 dark:border-white/10">
       <div className="mx-auto max-w-5xl px-6 py-16 sm:py-20">
-        <h2 className="text-2xl font-semibold tracking-tight">联系我</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">{t.footer.heading}</h2>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-700 dark:text-ink-100/80">
-          想聊项目细节、看完整代码，或者想申请演示环境的账号，都可以直接发邮件，或者点 GitHub 直接看源码。
+          {t.footer.intro}
         </p>
 
         <div className="mt-6 flex flex-wrap items-center gap-3">
-          <a className="btn-primary" href={mailtoUrl(contact.email, "来自作品集的联系")}>
+          {/* mailto 主题也走字典：切到英文后，邮件客户端里的草稿主题不该还是中文 */}
+          <a className="btn-primary" href={mailtoUrl(contact.email, t.footer.mailSubject)}>
             {contact.email}
           </a>
           <button type="button" className="btn-ghost" onClick={handleCopy}>
@@ -52,7 +55,7 @@ export default function ContactFooter() {
         </div>
 
         <p className="mt-10 text-xs text-ink-500 dark:text-ink-100/50">
-          © {new Date().getFullYear()} {contact.displayName} · 本站为纯静态页面
+          {t.footer.copyright(new Date().getFullYear(), contact.displayName)}
         </p>
       </div>
     </footer>

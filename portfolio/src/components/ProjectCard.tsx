@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
 
-import { APP_DOWNLOAD_NOTE, entryUrl } from "../lib/entry";
+import { entryUrl } from "../lib/entry";
 import type { Platform, Project } from "../types";
 import DemoSwitcher from "./DemoSwitcher";
 import EntryButton from "./EntryButton";
+import { useLang } from "./LanguageProvider";
 import Toast from "./Toast";
 
-const STATUS_TEXT: Record<Project["status"], string> = {
-  shipped: "已上线",
-  "in-progress": "开发中",
-};
+// 状态徽标 / 三个禁用态 / 两行说明 / Toast 文案全部来自 `data/strings.ts` ——
+// 原先把状态文案写成组件里的 `STATUS_TEXT` 常量，多语言后它必须与其它文案一起被翻译，
+// 所以移进字典（`t.card.status`）；组件里不再有任何面向访客的字符串。
 
 /** Toast 停留时长（与 `ContactFooter` 的"复制成功"复位同为几秒级，不用通知库）。 */
 const TOAST_MS = 3200;
@@ -32,19 +32,17 @@ const TOAST_MS = 3200;
 // 这就是为什么演示环境还没落地也能先把页面放出去：访客不会点进一个 404。
 // 联系方式（邮箱 / GitHub）统一收在页脚 `ContactFooter`：不在每张卡上重复放邮件入口。
 export default function ProjectCard({ project }: { project: Project }) {
+  const { t } = useLang();
   const [platform, setPlatform] = useState<Platform | undefined>(project.demos[0]?.platform);
   const [toast, setToast] = useState<string | null>(null);
   // 两个入口共用的目标（单一事实源）：标题行「开始使用」与底部「进入系统」都从这里取
   const entry = entryUrl(platform ?? "web", project.links);
+  // 端名（`PC Web` / `Mobile H5` / …）两种语言一致，直接取数据，不进字典
   const entryLabel = project.demos.find((demo) => demo.platform === platform)?.label ?? "PC Web";
   // 原生端在浏览器里没有可跳的 URL（RN 的 /login 是 App 内路由），不是"有没有配地址"的问题
   const unsupported = platform === "rn";
   // 说明行：原生端解释「为什么进不去 + 替代路径」；未接入时解释「为什么还不能进」
-  const bottomNote = unsupported
-    ? "App 尚未上架应用商店；上面的端 Tab 可切到 Mobile H5 / PC Web，在浏览器里直接体验。"
-    : entry
-      ? null
-      : "演示环境（域名 + 只读演示账号 + 成本护栏）尚在部署中；接入后此处会变成可直接操作的入口。";
+  const bottomNote = unsupported ? t.card.noteApp : entry ? null : t.card.noteNotConnected;
 
   // 定时器写在 effect 里（而不是裸 setTimeout）：卸载时清掉，避免组件消失后 setState
   useEffect(() => {
@@ -57,14 +55,14 @@ export default function ProjectCard({ project }: { project: Project }) {
     <article className="card">
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="text-xl font-semibold tracking-tight">{project.name}</h3>
-        <span className="chip text-brand-600 dark:text-brand-500">{STATUS_TEXT[project.status]}</span>
+        <span className="chip text-brand-600 dark:text-brand-500">{t.card.status[project.status]}</span>
         <span className="text-sm text-ink-500 dark:text-ink-100/60">{project.period}</span>
         {/* 标题行右侧的入口：跟随当前端；没配地址时组件自身返回 null（不留空位、不给死链） */}
         {platform && (
           <EntryButton
             project={project}
             platform={platform}
-            onUnsupported={() => setToast(APP_DOWNLOAD_NOTE)}
+            onUnsupported={() => setToast(t.card.toastAppDownload)}
             className="ms-auto"
           />
         )}
@@ -95,7 +93,7 @@ export default function ProjectCard({ project }: { project: Project }) {
         {unsupported ? (
           /* 原生端：App 未上架 → 禁用态而不是死链；原因写在下面一行，不用点了才知道 */
           <button type="button" className="btn-disabled" disabled aria-disabled="true">
-            App 下载暂未开放
+            {t.card.disabledApp}
           </button>
         ) : entry ? (
           <a
@@ -103,19 +101,19 @@ export default function ProjectCard({ project }: { project: Project }) {
             href={entry}
             target="_blank"
             rel="noreferrer noopener"
-            aria-label={`进入系统：打开 ${project.name} 的 ${entryLabel} 登录页`}
+            aria-label={t.card.ariaEnterSystem(project.name, entryLabel)}
           >
-            进入系统 →
+            {t.card.enterSystem}
           </a>
         ) : (
           /* 未接入：禁用态 + 下方一行「为什么还不能进」；联系方式统一在页脚，这里不再重复 */
           <button type="button" className="btn-disabled" disabled aria-disabled="true">
-            演示环境准备中
+            {t.card.disabledEntry}
           </button>
         )}
         {project.links.repo && (
           <a className="btn-ghost" href={project.links.repo} target="_blank" rel="noreferrer noopener">
-            源码仓库
+            {t.card.repo}
           </a>
         )}
       </div>

@@ -79,7 +79,7 @@ ai-engine：rag_retrieve → agent_research(只读取证) → generate(流式) �
 | `frontend/` | PC Web 工作台 | 运营 / 审批员的主战场：8 条路由，详情页有打字机 + 轨迹 + 驳回复盘 | 只连 `/api/v1`，绝不跨层直连 ai-engine / PG |
 | `mobile-h5/` | 移动 H5 | 审批与轻量操作为主，浏览器即开即用 | 与桌面端**共享契约核心层**，页面壳各写各的 |
 | `mobile-rn/` | 原生 App（iOS + Android） | 一套代码两端；6 屏与 H5 **逐条对齐** | 共享层抽出「平台端口」承载 6 个平台差异点，UI 自研零 UI 依赖 |
-| `portfolio/` | 静态作品集宣传页 | 三端演示（7 段动图）+ 作品合集 + 联系方式 | 零后端依赖、可独立部署；生命周期与业务前端不同，故单独成模块 |
+| `portfolio/` | 静态作品集宣传页 | 三端演示（7 段动图）+ 作品合集 + 联系方式；**中 / 英可切换**（右上角开关） | 零后端依赖、可独立部署；生命周期与业务前端不同，故单独成模块 |
 
 ### 1.5 技术选型总览
 
@@ -100,7 +100,7 @@ ai-engine：rag_retrieve → agent_research(只读取证) → generate(流式) �
 | P0~P6 | 契约冻结、backend 骨架与认证、商品 CRUD 与彻底删除、生成闭环与审批 CAS、SSE、合规词库与运维只读面 |
 | P7~P11 | PC 工作台、nginx 双层生产编排 + CI/CD、移动 H5、原生 App、作品集宣传页 |
 | 已知边界 | 暂未接真实电商平台（淘宝 / 京东 / 拼多多）的合规判定 |
-| 测试规模 | 数据库 102 例 · backend 194 例 · ai-engine 239 例 · 四个前端各有独立用例集（桌面 92 / H5 24 / 原生 66 / 作品集 55） |
+| 测试规模 | 数据库 102 例 · backend 194 例 · ai-engine 239 例 · 四个前端各有独立用例集（桌面 92 / H5 24 / 原生 66 / 作品集 82） |
 
 ---
 
@@ -162,7 +162,8 @@ Python 侧（ai-engine）与 TypeScript 侧（三端前端）不可能共享代�
 
 - `frontend/src/services/streamLabels.ts`：三端**共用一份**事件渲染
 - `portfolio/src/data/projects.ts`：作品集全部内容 + 入口链接；用例做**「声明即校验」**
-  （写进数据的 gif 必须真实存在）。
+  （写进数据的 gif 必须真实存在）。中英两份（`projects.ts` + `projects.en.ts`）与 UI 文案字典
+  （`strings.ts`）的**结构对齐**同样由门禁守（逐条比对 + 英文页不得残留中文）。
 - `ai-engine` 的 `state/schemas.py`：LLM 结构化输出的 JSON Schema 单一事实源。
 - `ai-engine` 的 `ports/event_bus.py`：所有出站消息信封统一带 `schema_version`（单点注入）。
 - `infra/.env.template`：环境变量**唯一键清单**；`.env` 与模板由脚本保持同向一致（幂等追加、绝不覆盖已有值）。
@@ -617,4 +618,4 @@ ECS：docker compose pull && up -d → 跑验收脚本
 | 桌面端 | 92 | 页面语义护栏 / SSE 控制帧 / 审批留痕 |
 | 移动 H5 | 24 | 与桌面端同口径的关键交互 |
 | 原生 App | 66 | 屏幕交互与共享契约层 |
-| 作品集 | 55 | 「声明即校验」等静态页门禁 |
+| 作品集 | 82 | 「声明即校验」等静态页门禁 + 中英数据/文案对齐与语言切换 |

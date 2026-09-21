@@ -80,7 +80,7 @@ ai-engine: rag_retrieve → agent_research(read-only research) → generate(stre
 | `frontend/` | PC web console | The main workspace for operators / reviewers: 8 routes; the detail page has a typewriter, an agent trace and a rejection review | Talks to `/api/v1` only, never reaches across to ai-engine / PG |
 | `mobile-h5/` | Mobile H5 | Mostly approvals and light operations, usable in any browser with no install | **Shares the contract core layer** with the desktop console; each page shell is written separately |
 | `mobile-rn/` | Native app (iOS + Android) | One codebase for both platforms; its 6 screens are **matched line by line** with H5 | Platform ports in the shared layer carry the 6 platform differences; the UI is hand-rolled with zero UI dependencies |
-| `portfolio/` | Static portfolio landing page | Demos of all three clients (7 GIF clips) + project gallery + contact | No backend dependency, deployable on its own; its lifecycle differs from the product front ends, so it is a module of its own |
+| `portfolio/` | Static portfolio landing page | Demos of all three clients (7 GIF clips) + project gallery + contact; **switchable between Chinese and English** (a toggle in the top-right corner) | No backend dependency, deployable on its own; its lifecycle differs from the product front ends, so it is a module of its own |
 
 ### 1.5 Technology choices at a glance
 
@@ -101,7 +101,7 @@ ai-engine: rag_retrieve → agent_research(read-only research) → generate(stre
 | P0~P6 | Contract freeze, backend skeleton and authentication, product CRUD with hard delete, generation loop with approval CAS, SSE, compliance word lists and the read-only ops surface |
 | P7~P11 | PC console, two-layer nginx production setup + CI/CD, mobile H5, native app, portfolio landing page |
 | Known limits | Compliance decisions for real marketplaces (Taobao / JD / Pinduoduo) are not integrated yet |
-| Test coverage | Database 102 cases · backend 194 · ai-engine 239 · four front ends with their own suites (desktop 92 / H5 24 / native 66 / portfolio 55) |
+| Test coverage | Database 102 cases · backend 194 · ai-engine 239 · four front ends with their own suites (desktop 92 / H5 24 / native 66 / portfolio 82) |
 
 ---
 
@@ -164,7 +164,9 @@ single source of truth**, locked from both ends by "contract complement points +
 
 - `frontend/src/services/streamLabels.ts`: one **shared** event renderer for all three clients
 - `portfolio/src/data/projects.ts`: all portfolio content + entry links; a test does **"declare, then verify"**
-  (every GIF written into the data must really exist).
+  (every GIF written into the data must really exist). The Chinese and English sets (`projects.ts` +
+  `projects.en.ts`) and the UI copy dictionary (`strings.ts`) are kept **structurally aligned by the same
+  kind of gate** (item-by-item comparison + no Chinese characters may be left on the English page).
 - `state/schemas.py` in ai-engine: the single source of truth for the JSON Schema of LLM structured output.
 - `ports/event_bus.py` in ai-engine: every outbound message envelope carries `schema_version` (injected in one place).
 - `infra/.env.template`: the **single key list** for environment variables; a script keeps `.env` and the template in
@@ -656,4 +658,4 @@ also the precondition for "a solo project still dares to run destructive tests".
 | Desktop | 92 | page semantic guard rails / SSE control frames / approval trail |
 | Mobile H5 | 24 | the key interactions sharing the desktop's semantics |
 | Native app | 66 | screen interactions and the shared contract layer |
-| Portfolio | 55 | "declare, then verify" and other static page gates |
+| Portfolio | 82 | "declare, then verify" and other static page gates + Chinese/English data & copy alignment and language switching |
