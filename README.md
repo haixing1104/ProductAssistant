@@ -3,17 +3,18 @@
 > **B 端商品文案工作台**：AI 生成 → 规则与模型双评估 → 人机协同终审 → 落库上架。
 > 覆盖 PC Web 工作台、移动 H5、React Native 原生 App 三种客户端，外加一个纯静态作品集宣传页。
 >
-> 本文是**唯一对外总文档**，只讲**功能与核心架构设计**：每个模块解决什么问题、边界画在哪、
-> 复杂度落在什么地方、技术选型如何取舍。**安装与部署的操作步骤不在此文**（见文末说明）。
+> 本文是**对外中文主文档**（英文版见 [`README_EN.md`](README_EN.md)），只涉及**功能与核心架构设计**：
+> 每个模块解决什么问题、边界画在哪、复杂度落在什么地方、技术选型如何取舍。
+> 🌐 中文 | [English](README_EN.md)
 
 ## 目录
 
 | 章节 | 内容 |
 |---|---|
-| [一、项目介绍](#一项目介绍) | 业务闭环、角色与多租户、客户端形态、技术选型、完成度 |
+| [一、项目介绍](#一项目介绍) | 业务闭环、角色与多租户、客户端形态、技术选型 |
 | [二、设计原则](#二设计原则) | 五个模块的划分与依赖红线、六边形架构、契约优先、数据隔离 |
 | [三、gif 预览](#三gif-预览) | 三端 7 段真实运行的动图 |
-| [四、AI-engine 的编排逻辑](#四ai-engine-的编排逻辑) | LangGraph 图编排、三条任务链路、事件总线、只读取证 Agent |
+| [四、AI-engine 的编排逻辑](#四ai-engine-的编排逻辑) | LangGraph 图编排、三条任务链路、事件总线、HITL+钉钉审批、只读取证 Agent |
 | [五、backend 逻辑](#五backend-逻辑) | 状态机单写、SSE 实时过程、常驻任务与幂等加固 |
 | [六、frontend 逻辑](#六frontend-逻辑) | 桌面工作台、三端共享契约核心层、SSE 语义陷阱 |
 | [七、mobile 逻辑](#七mobile-逻辑) | H5 与原生 App 的取舍、平台端口、三端一致性 |
@@ -79,11 +80,12 @@ ai-engine：rag_retrieve → agent_research(只读取证) → generate(流式) �
 | `mobile-h5/` | 移动 H5 | 审批与轻量操作为主，浏览器即开即用 | 与桌面端**共享契约核心层**，页面壳各写各的 |
 | `mobile-rn/` | 原生 App（iOS + Android） | 一套代码两端；6 屏与 H5 **逐条对齐** | 共享层抽出「平台端口」承载 6 个平台差异点，UI 自研零 UI 依赖 |
 | `portfolio/` | 静态作品集宣传页 | 三端演示（7 段动图）+ 作品合集 + 联系方式 | 零后端依赖、可独立部署；生命周期与业务前端不同，故单独成模块 |
+
 ### 1.5 技术选型总览
 
 | 层 | 选型 | 选它的理由 |
 |---|---|---|
-| 编排 | Python + **LangGraph**（StateGraph + PostgresSaver） | 需要「可中断 / 可恢复的人工审批」：图状态持久化 + `interrupt`/`resume` 是原生能力，比手写状态机可靠得多 |
+| 编排 | Python + **LangGraph**（StateGraph + PostgresSaver） | 需要「可中断 / 可恢复的人工审批」：图状态持久化 + `interrupt`/`resume` 是原生能力，比手写状态机可靠 |
 | AI 网关 | 智谱 GLM（文本 / 生图 / embedding），OpenAI 兼容协议 | function calling 走标准 `tools` 协议，接入 Agent **零新增依赖** |
 | 业务 API | **FastAPI** + async SQLAlchemy + Pydantic | 异步是 SSE 长连接的前提；Pydantic 顺手承担契约校验 |
 | 桌面前端 | React 19 + TypeScript + **Vite 8** + Ant Design 6 + Zustand + React Query v5 | 三端共享 TypeScript 契约层；antd 覆盖中后台重型交互 |
@@ -97,7 +99,7 @@ ai-engine：rag_retrieve → agent_research(只读取证) → generate(流式) �
 |---|---|
 | P0~P6 | 契约冻结、backend 骨架与认证、商品 CRUD 与彻底删除、生成闭环与审批 CAS、SSE、合规词库与运维只读面 |
 | P7~P11 | PC 工作台、nginx 双层生产编排 + CI/CD、移动 H5、原生 App、作品集宣传页 |
-| 已知边界 | 未接真实电商平台（淘宝 / 京东 / 拼多多）的合规判定；成本侧只有**调用次数上限**，token 级计量未接线；Agent 的质量收益尚无 A/B 数据 |
+| 已知边界 | 暂未接真实电商平台（淘宝 / 京东 / 拼多多）的合规判定 |
 | 测试规模 | 数据库 102 例 · backend 194 例 · ai-engine 239 例 · 四个前端各有独立用例集（桌面 92 / H5 24 / 原生 66 / 作品集 53） |
 
 ---
@@ -131,7 +133,7 @@ database（2 SCHEMA / 4 ROLE）        infra（容器 / nginx / CI）
 
 ai-engine 是这套原则最彻底的体现：`ports/`（13 个出站抽象）只有 `abc` 和标准库、**不含任何实现**；
 `adapters/` 负责实现（PG / Redis / 智谱 / OSS / Milvus / Pillow / 规则引擎），且**不 import 内核**。
-好处是「换实现不改内核」—— 这也是「只有一个模型供应商」却仍要写成适配器的原因。
+好处是「换实现不改内核」。
 
 | 层 | 作用 | 允许 import | 红线 |
 |---|---|---|---|
@@ -145,7 +147,7 @@ ai-engine 是这套原则最彻底的体现：`ports/`（13 个出站抽象）�
 ### 2.3 契约优先：两侧互不共享代码
 
 Python 侧（ai-engine）与 TypeScript 侧（三端前端）不可能共享代码，因此**契约就是唯一事实源**，
-靠「契约互补点 + 用例」双向锁定 —— 改一侧必须改另一侧。几个真实例子：
+靠「契约互补点 + 用例」双向锁定：
 
 | # | 事实 | 另一侧的对策 |
 |---|---|---|
@@ -153,16 +155,14 @@ Python 侧（ai-engine）与 TypeScript 侧（三端前端）不可能共享代�
 | 2 | `raw_images` 规范形状是 `list[str]` | 写入即规范化；响应层兼容历史 `[{url:…}]` 形状 |
 | 3 | purge 的守卫是「商品行还在 → 中止清理」 | 彻底删除必须在**物理删行 + commit 之后**才投递 purge |
 | 4 | purge 只清 AI 侧内容的图片 | 上传原件由 backend 自己删（`img/pa/` 白名单） |
-| 5 | 重复投递返回 `duplicate` / `busy` 是**正常** | 消费器按「已终态跳过」处理，不当错误上报 |
-| 6 | 合规匹配语义（最长匹配 → 左优先去重叠 → 稳定排序） | 预览匹配器逐条对齐，一致性由用例锁定 |
-| 7 | 坏正则在 AI 侧**静默跳过** | 规则入参当场校验正则语法，把「配了却没拦」挡在入库前 |
+| 5 | 合规匹配语义（最长匹配 → 左优先去重叠 → 稳定排序） | 预览匹配器逐条对齐，一致性由用例锁定 |
+| 6 | 坏正则在 AI 侧**静默跳过** | 规则入参当场校验正则语法，把「配了却没拦」挡在入库前 |
 
-### 2.4 单一事实源清单（改一处必须同步的地方）
+### 2.4 单一事实源清单
 
-- `frontend/src/services/streamLabels.ts`：三端**共用一份**事件渲染 —— 历史上一份手抄拷贝导致
-  生产者发 `tool`、两边都读 `name`，界面上工具名常年空白。
+- `frontend/src/services/streamLabels.ts`：三端**共用一份**事件渲染
 - `portfolio/src/data/projects.ts`：作品集全部内容 + 入口链接；用例做**「声明即校验」**
-  （写进数据的 gif 必须真实存在，挡住「素材文件名写错 → 上线后是一块空白」）。
+  （写进数据的 gif 必须真实存在）。
 - `ai-engine` 的 `state/schemas.py`：LLM 结构化输出的 JSON Schema 单一事实源。
 - `ai-engine` 的 `ports/event_bus.py`：所有出站消息信封统一带 `schema_version`（单点注入）。
 - `infra/.env.template`：环境变量**唯一键清单**；`.env` 与模板由脚本保持同向一致（幂等追加、绝不覆盖已有值）。
@@ -176,12 +176,6 @@ Python 侧（ai-engine）与 TypeScript 侧（三端前端）不可能共享代�
   `role_pa_ai_setup`（仅建 checkpoint 表）。
 - 效果：**AI 层即使代码写错也写不动业务表**（有红线负向断言用例守着）。
 
-### 2.6 刻意不做的事
-
-- **不做软删除**：只保留彻底删除一条路径（软删端点已下线并显式返回 405）。
-- **不给 Agent 写工具**，也不做多 Agent / 任务规划 / 长期记忆 / 自治 RAG 循环（是「助手」不是「自治体」）。
-- **运维面只读**：DLQ 处置必须走人工 SOP，刻意不提供「一键重投」（盲目重投只会再造一条毒消息）。
-- **不接真实电商平台的合规判定**（外部依赖），**不做 token 级成本计量**（当前只有调用次数上限兜底）。
 ---
 
 ## 三、gif 预览
@@ -210,16 +204,6 @@ Python 侧（ai-engine）与 TypeScript 侧（三端前端）不可能共享代�
 | iOS + Android 一套代码：概览 |
 |---|
 | ![原生 App](portfolio/public/demos/pa/rn/01-overview.gif) |
-
-### 3.4 演示页的设计取舍
-
-- **一次只挂载「一个端的一段」**：手机上多段动图同时播会掉帧发热；顺带做到「未点开的端与段零下载」
-  —— 动图动辄几 MB，这条最省流量。代价是切回来要重新加载（每段 20~35s，可接受）。
-- **外框比例取自素材真实尺寸**（桌面 1882×912 / H5 493×854 / 原生 240×520 真机录屏重编码），
-  不用统一比例硬套，避免动图被拉伸。
-- **入口跟随端切换**：标题行「开始使用」与底部「进入系统」**同源**（共用一份派生值，不会两处不同步）——
-  PC / H5 跳各自登录页（新窗口，访客不丢宣传页），原生端无浏览器可跳 URL：标题行给 Toast、底部禁用 + 一行原因；
-  演示环境未接入时**入口不渲染**（访客不会点到一个 404）。
 
 ---
 
@@ -255,6 +239,7 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
   恢复时图实例是**新建的**，靠 `thread_id` 从 checkpoint 读回状态（跨消息 / 跨进程 / 跨实例）。
 - **条件边是纯函数**（只读 State）：`should_retry_or_human` 决定 `retry / persist / human`；
   「高价」阈值（500）触发转人工 —— 成本与风险被显式建模进拓扑，而不是靠提示词约束。
+
 ### 4.3 三条任务链路为什么必须分开设计
 
 | 链路 | 语义 | 复杂度落在哪 |
@@ -263,7 +248,7 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
 | ② `job:approval` | **跨消息 / 跨进程 / 跨图实例**恢复一次挂起的生成 | 分布式锁 + checkpoint 恢复 + 「驳回也要给终态事件」 |
 | ③ `job:product_purge` | 商品彻底删除后的物理清理 | **有序的前置收集**：行删了 URL 与 thread_id 就不可逆 |
 
-几条容易被忽略、写反就出事的约束：
+约束：
 
 - ③ 有**前置守卫**：商品行仍存在 = 孤儿 purge 消息（删除并没生效）→ 中止并 ack，防误删有效数据。
 - ③ 的顺序是「先收集图片 URL、先反查 thread_id」→ 再删内容与评估日志 → 清 checkpoint 三表 →
@@ -275,7 +260,7 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
   但若将来把 resume 后的路径接回 `evaluate`，必须补传快照。这类「现在没问题、将来会踩」的点，
   在代码里都有显式注释。
 
-### 4.4 事件总线：两个出站键，用途完全不同
+### 4.4 事件总线：两个出站键，用途不同
 
 | 出站键 | 内容 | 消费者 | 语义 |
 |---|---|---|---|
@@ -287,9 +272,8 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
 `agent.done` · `stage.generating` · `content.chunk` · `stage.evaluating` · `evaluate.result` ·
 `stage.imaging` · `image.ready` · `done` · `hitl.waiting` · `approval.resumed` · `rejected` · `failed`。
 
-> **界面只说业务语言**：`stop_reason` / `turns` / `tool_calls` / 内部工具名 / `score=` / `source=uploaded`
+> **界面只渲染业务语言**：`stop_reason` / `turns` / `tool_calls` / 内部工具名 / `score=` / `source=uploaded`
 > 这类实现细节**一律不渲染**，只留在载荷里供排障（`evt` 流 / 日志 / `agent_trace`）。
-> 这条是用户反馈驱动的设计：原话是「这是非业务的数据，没人知道这是什么意思」。
 
 ### 4.5 一次任务最多触发 6 处模型调用
 
@@ -302,8 +286,7 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
 | ⑤ | `image_*` 生图 | CogView（含下载图床） |
 | ⑥ | `save_content` 定稿入向量库 | 供后续商品的相似召回 |
 
-**降级设计贯穿全篇**：缺配置 → 工厂返回 `None` → 节点自行降级（确定性 Mock 文案 / 默认一次通过 90 分 /
-跳过写向量 / 无图纯文本），**绝不阻断启动**。代价是「看起来在跑、其实在降级」，
+**降级设计贯穿全篇**：缺配置 → 工厂返回 `None` → 节点自行降级（确定性 Mock 文案 / 跳过写向量 / 无图纯文本），**绝不阻断启动，不能阻断前端渲染，提升用户体验**。
 所以每类降级都有显式留痕（启动自检 + 每次生成一行结果 + 事件载荷）。
 
 三套**互相独立**的配额（成本评估时必须分别计入，走 `retry` 边会让 ③④ 重复执行）：
@@ -312,18 +295,20 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
 |---|---|---|
 | Reflection 重试（评估未过 → 重写） | 2 | 条件边转人工（HITL） |
 | JSON 结构修复（输出不合契约） | 2（最多 3 次调用） | 安全降级 `passed=False, score=0`，原因写 `last_eval_errors` |
-| Agent 预算（模型轮次 / 工具次数） | 2 / 3 | 中间件在下一轮前取消，用已有证据收敛 |### 4.6 只读取证 Agent：为什么它是「助手」而不是「自治体」
+| Agent 预算（模型轮次 / 工具次数） | 2 / 3 | 中间件在下一轮前取消，用已有证据收敛 |
+
+### 4.6 只读取证 Agent
 
 在 `rag_retrieve` 与 `generate` 之间插入 `agent_research` 节点：用 function calling 调**只读工具**
 核对真实素材与历史记录，结论写进 `agent_context`，生成提示词把它作为「事实要点」带进去。
 
 | 它解决的问题 | 应对 | 工具 |
 |---|---|---|
-| 模型编造价格 / 库存 / 资质 | 真读商品表；查不到返回 `{"found": false}`（**逼模型说「查不到」而不是编造**） | `get_product_facts` |
+| 模型幻觉编造价格 / 库存 / 资质 | 真读商品表；查不到返回 `{"found": false}`（**逼模型说「查不到」而不是编造**） | `get_product_facts` |
 | 反复踩同一条违规词 | 拉历史评估的违规点 + 动笔前自查 | `get_eval_history` / `scan_compliance` |
 | 被同一理由反复驳回 | 拉历史审批驳回意见 | `get_approval_history` |
 | 不像本店历史高转化风格 | 语义召回同租户历史文案片段 | `retrieve_similar_copy` |
-| 「为什么这么写」说不清 | 逐轮审计轨迹 + 实时事件（界面可见「AI 正在核对什么」） | `agent_trace` + `agent.tool` |
+| 「为什么这么写」说不清 | 逐轮审计轨迹 + 实时事件（界面实时渲染） | `agent_trace` + `agent.tool` |
 
 红线与边界：
 
@@ -332,25 +317,13 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
   有红线断言用例；这一条比「在提示词里叮嘱不要越权」可靠得多。
 - **按端口有无动态裁剪工具**：Milvus 未配 → 不注册 `retrieve_similar_copy`。避免「调了但永远为空」的幻觉入口。
 - **降级红线**：未注入 runtime → 节点 no-op（链路行为与未接入前完全一致）；LLM / 网络异常 →
-  收敛为 `stop_reason=runtime_error` **不抛异常**；研究失败**绝不**把商品判 failed（研究是「增强」不是「必需」）。
+  收敛为 `stop_reason=runtime_error` **不抛异常**；研究失败**绝不**把商品判 failed（研究是「增强功能」不是「必需功能」）。
 - **中间件三条策略**：模型调用上限（预算熔断）/ 工具调用上限 / 只读工具重试兜底；
   `wrap_tool_call` **逆序嵌套**（列表第一个 = 最外层）。**无独立开关**，要停只能整体关 Agent。
 - 子图**不挂 checkpointer**：避免把内层往返状态写进**生成线程**的 checkpoint，破坏 HITL 的 interrupt/resume 语义。
 
 **默认开，且是可逆的**：`AI_ENGINE_AGENT_ENABLED` 未配置即视为开 —— 理由是「用真库素材 / 历史违规点 /
-审批意见校准事实」应当是**默认质量下限**，而不是少数场景的奢侈品。代价如实标注：
-
-| 维度 | 代价（必须监控） |
-|---|---|
-| 质量 | `agent_context` **会改写最终文案**；若 Agent 产出低质/幻觉要点会污染文案，且**尚无 A/B 数据**证明收益 |
-| 成本 | 单任务模型调用从 4 次最多涨到 **8 次以上**；`retrieve_similar_copy` 内部还会再触发一次 embedding；多轮上下文使 token **远超线性**；token 级计量仍未接线 |
-| 延迟 | 卡在 `rag_retrieve` 与 `generate` 之间：≤2 轮**同步**模型调用 + ≤3 次真查库，期间**无流式输出**，前端只能看阶段提示 |
-
-因此默认预算刻意收紧（2 轮 / 3 次：3 次 ≈ 够取「商品事实 + 一条历史证据 + 一次合规自查」；
-⚠️ **轮次不要低于 2**，1 轮来不及「工具结果 → 结论」的第二次往返，等于放弃取证），
-并且一行 env 即可回退到与「未接入 Agent 时完全一致」的行为（有回归测试锁定）。
-该关掉它的信号：token 账单需要压降、`agent.done` 里大量非 `completed`（等于白花钱）、
-同批商品开关对比后评估分未改善、怀疑文案异常由 `agent_context` 引起（先关掉再复现）。
+审批意见校准事实」应当是**默认质量下限**，而不是少数场景的奢侈品。
 
 ### 4.7 checkpoint 生产方案（HITL 的底座）
 
@@ -358,8 +331,6 @@ START → rag_retrieve → agent_research(可选增强) → generate → evaluat
 |---|---|---|
 | 建表（幂等、一次性） | `role_pa_ai_setup` | `PostgresSaver.setup()` 建 `checkpoints` / `checkpoint_blobs` / `checkpoint_writes` / `checkpoint_migrations` |
 | 运行期读写 | `role_pa_ai` | `PostgresSaver` + psycopg 连接池（worker 内**进程级单例**，懒建；停机释放） |
-
-四个值得记下来的细节：
 
 - **池化下不能用一次性 `SET search_path`**（新连接会落回 `public`）→ 在连接工厂层固化
   `options="-c search_path=…"`、`autocommit=True`、`row_factory=dict_row`、
@@ -420,12 +391,12 @@ POST /approvals/{id}/approve|reject
   → 漏投兜底：ApprovalRedriveWatchdog（Redis SETNX 节流）+ 手动补投端点
 ```
 
-三处「顺序写反就出事」的地方：**投递必须在 commit 之后**（否则消费端可能读不到数据）；
+约束：**投递必须在 commit 之后**（否则消费端可能读不到数据）；
 **CAS 必须带 `status='pending'`**（否则并发双批准）；**补投必须能识别「其实不需要投」**——
 对已推进的商品再 resume 是**静默 no-op**（实测：不报错、不重跑、不重复落库、不翻转决策），
 所以接口必须回 `outcome=not_needed` 而不是假装成功。
 
-### 5.3 审批域的三条语义（事故后定稿）
+### 5.3 审批域的三条语义
 
 | 能力 | 契约 | 为什么 |
 |---|---|---|
@@ -455,11 +426,10 @@ POST /approvals/{id}/approve|reject
 | `OutboxDeliverer` | 投递审批通知（outbox → 钉钉 / 控制台） | 指数退避，达上限转 `dlq`；`last_error` **只在未送达期间存在**（送达即清除），「曾失败过」看 `retry_count` —— 否则界面会把已自愈的抖动说成投递失败 |
 | `ApprovalRedriveWatchdog` | 补投「已定案但 AI 层未收到」的 resume | 同上，且带 Redis 节流防重复投递 |
 
-终态消费器的 5 条幂等 / 边界加固是这一章最容易被省略、也最不该省的部分：
+终态消费器的 5 条幂等 / 边界加固：
 **重复投递按「已终态跳过」**（`duplicate` / `busy` 是正常返回，不当错误上报）、**CAS 更新**、
 **`content_snapshot` 仅转人工时携带**、**失败原因写回任务行**（界面直接显示
 `input_compliance_blocked(商品标题): 命中违禁词「最便宜」`）、**通知走 outbox 而非同步发送**。
-另有一处差异值得记录：**商品状态是 6 态（含 `deleted`）**，消费器因此多了「已删除跳过」加固。
 
 ### 5.6 合规词库与运维面
 
@@ -491,12 +461,11 @@ POST /approvals/{id}/approve|reject
 **页面壳各写各的**：契约变更只改一处，三端 UI 仍可各自最优。
 
 代价是一条纪律：**改共享层必须同时跑三端的用例**（各端有独立脚本，同一套「以文件级 ✓ 判定 +
-自带超时」的收尾口径）。历史教训正是这条纪律的反面：桌面端曾有一份 `streamLabels` 的手抄拷贝，
-生产者发 `tool` 键、两边都读 `name`，导致界面上的工具名**常年空白**却没人发现。
+自带超时」的收尾口径）。
 
-### 6.3 三处「照抄别的项目会错」的 SSE 语义
+### 6.3 三处 SSE 语义
 
-这是本项目与常见实现**语义相反**的地方，写错的表现是「界面永远转圈」：
+前端注意事项：
 
 1. `hitl.waiting` 在本项目是**终态**（服务端随即关流）→ 前端必须**停重连**并显示「已转人工审批」；
 2. `ready` 是 backend 的**控制帧**（无进行中任务）→ 显示提示并停止，不空转重连；
@@ -505,17 +474,6 @@ POST /approvals/{id}/approve|reject
 
 三端共用同一份 `streamLabels.ts` 渲染事件，由用例用**真实事件载荷**锁定，并含一条负向断言：
 渲染结果**不得出现** `stop_reason` / `turns` / `tool_calls` 等内部字段。
-
-### 6.4 其它刻意的语义差异
-
-- 删除**只有彻底删除**一条路径（软删端点已下线，调用它会拿到显式 405）；
-- 错误信封是 `{code, data, message}`（不是 `detail`），分页读总数走 `X-Total-Count`；
-- OSS 预签名需要 `product_id`（图片上传在商品详情页）；
-- 深链审批带一次性 `ticket`：未登录也能落到「登录 → 回跳原页」；
-- 「驳回后详情页看不到内容」**是设计如此**：批准前不写 `product_contents`（驳回走 `reject_end`，不落库），
-  被驳回的图文去「审批与驳回复盘」看，那里显式传 `status=all`；
-- 三路查询（内容 / 轨迹 / 审批）失败会显示**可重试的告警**，不被当成「没有数据」—— 这是「静默显示空列表」
-  这类最恶心的 bug 的通用解法。
 
 ---
 
@@ -530,13 +488,13 @@ POST /approvals/{id}/approve|reject
 
 ### 7.2 共享层抽出的「平台端口」
 
-四端（Web / H5 / RN）需求相同、实现不同的 6 个点抽成 `platform.ts`：
+三端（Web / H5 / RN）需求相同、实现不同的 6 个点抽成 `platform.ts`：
 **接口基址 / 会话回跳 / 过期事件 / 定时器 / JWT 解码 / SSE 与二进制传输**。
 
 正因为抽掉了这 6 点，`http.ts`（单飞续签 + 401 重放）与 `sse.ts`（`hitl.waiting` 终态 /
 `ready` 不重连 / 注释帧三态）才能**三端共用一份实现** —— 否则每个端都会长出一份迟早语义漂移的拷贝。
 
-### 7.3 移动端的实现口径（与桌面端刻意不同的地方）
+### 7.3 移动端的实现口径
 
 - 布局用**表格替代**（窄屏下的信息密度取舍），关键字段用两列键值卡；
 - 图片查看交给原生 / 浏览器能力，不引 UI 库；
@@ -577,16 +535,16 @@ Milvus 全家桶走独立 profile：不启用 RAG 时不必为它付 2C2G 的内
 ### 8.3 镜像流水线：CI 构建、服务器只 pull
 
 ```text
-GitHub Actions（runner 在海外）
+GitHub Actions
   ├─ 矩阵构建 5 个镜像：backend / ai-engine / frontend / mobile-h5 / portfolio
-  ├─ 额外把第三方基础镜像（nginx / redis / postgres 等）**转推**到同一仓库
+  ├─ 额外把第三方基础镜像（nginx / redis / postgres 等）转推到同一仓库
   └─ 裸 docker push 到阿里云 ACR
         ├─ CI 用**公网**域名推送（runner 在海外）
-        └─ ECS 同地域用 **VPC** 域名拉取（免公网流量费）
+        └─ ECS 同地域用 VPC 域名拉取（免公网流量费）
 ECS：docker compose pull && up -d → 跑验收脚本
 ```
 
-两个踩过的坑直接改变了实现：
+注意事项：
 
 1. **不能用 buildx 的 `push: true`**：它产出 OCI 索引 / 证明清单（含 `platform=unknown/unknown`），
    ACR 个人版直接拒绝（`unknown manifest`）→ 改为「本地构建 + 裸 `docker push`」。
@@ -599,13 +557,11 @@ ECS：docker compose pull && up -d → 跑验收脚本
 | `ci.yml` | PR / push | 4 组 job：backend 测试 · ai-engine 测试 · 三前端矩阵（类型检查 0 错误 + 用例 + 生产构建）· **环境变量契约自检** |
 | `deploy.yml` | 主分支 / 手动 | 构建推 ACR → SSH 到 ECS → `compose pull` + `up -d` → 跑验收脚本 |
 
-**环境变量契约自检**是这套 CI 里最有价值的一条：`infra/.env.template` 是唯一键清单 ——
+**环境变量契约自检**：`infra/.env.template` 是唯一键清单 ——
 缺键 = ERROR、未登记键 / 弱口令 = WARN、生产模式（`--prod`）连弱口令也阻断。
 它把「上线才发现少个环境变量」提前到了 PR 阶段，代价只是维护一份模板。
-另一个口径值得强调：`PA_ENV` 决定 Redis 键前缀 `pa:{env}:…`，**生产必须显式改 `prod`**，
-否则消费端与生产端会各说各话（这条也在契约自检的扫描范围内）。
 
-### 8.5 Redis 在生产按「队列」而非「缓存」来治
+### 8.5 Redis 生产环境依赖「队列」而非「缓存」
 
 | 项 | 设置 | 原因 |
 |---|---|---|
@@ -614,9 +570,6 @@ ECS：docker compose pull && up -d → 跑验收脚本
 | 危险命令 | 禁用 `FLUSHALL` / `CONFIG` 等 | 防误操作 |
 | 网络 | **不暴露宿主端口** | 只允许容器网络内访问 |
 | 容量 | `MAXLEN` 裁剪 + TTL | 流不会无限增长 |
-
-配套的故障演练清单（kill -9 / 重复投递 / 脏消息 / Redis 重启 / 内存吃紧）、DLQ 处置 SOP、
-托管 Redis 对照清单属于操作手册范畴；口径不变的是：**DLQ 处置必须人工判根因**，不提供一键重投。
 
 ---
 
@@ -651,9 +604,8 @@ ECS：docker compose pull && up -d → 跑验收脚本
 ### 9.4 为什么敢让 AI 层连同一个库
 
 因为靠的是**权限**而不是约定：AI 层对业务表只有 SELECT，节点与模型层都不碰业务写路径；
-`delete_audits` 连 UPDATE / DELETE 都被 REVOKE。测试用**一次性容器**跑（临时 PG + 临时 Redis，
-真造业务数据），跑完 `down -v` 整体销毁，**宿主机数据库全程不被触碰** —— 这也是「单人项目也敢跑
-破坏性测试」的前提。
+`delete_audits` 连 UPDATE / DELETE 都被 REVOKE。测试用**一次性容器**执行（临时 PG + 临时 Redis，
+真造业务数据），跑完 `down -v` 整体销毁容器，**宿主机数据库全程不被触碰** —— 这也是「单人项目也敢跑破坏性测试」的前提。
 
 ### 9.5 测试规模
 
@@ -666,18 +618,3 @@ ECS：docker compose pull && up -d → 跑验收脚本
 | 移动 H5 | 24 | 与桌面端同口径的关键交互 |
 | 原生 App | 66 | 屏幕交互与共享契约层 |
 | 作品集 | 53 | 「声明即校验」等静态页门禁 |
-
-> 数据库测试的两条经验也写进了设计：**权限矩阵要逐条实测**（不是看完 DDL 就说「权限对」），
-> 以及**迁移要幂等重放**（重复执行不报错、约束与 GRANT 语义可验证）。
-
----
-
-## 附：关于内部文档
-
-本仓库此前把每个模块的设计与操作细节分散在 9 份子模块文档里（backend 契约、前端语义、
-移动端联调、部署手册、Redis 运维手册等）。为了让对外材料只有一份「只讲功能与设计」的入口，
-这些文档已从版本库移除（并在 Git 历史中一并清理），内容合并为一份**只存在于开发机上**的内部文档：
-与本文**逐章对应**，但补上全部可执行步骤、实测数据与排障 SOP，由 `.gitignore` 忽略、不随仓库发布。
-
-因此**代码注释里不再引用任何文档路径**：需要「怎么做」时看那份内部文档。
-对外发布产物里只有这一个 `README.md`，它只讲「是什么、为什么这么设计」。
