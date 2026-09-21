@@ -38,7 +38,7 @@ shaped this project:
 | Compliance review is manual, and a miss is expensive | A double gate — "deterministic rule engine + LLM semantic evaluation"; a rule hit fails fast and skips the model |
 | Approval is disconnected from generation (nobody can say who changed what) | A state-machine loop of generate → evaluate → human approval, with replayable events and an approval audit trail |
 
-In one sentence: generation is built as an **observable, interruptible, traceable** pipeline, not a chat box.
+In one sentence: generation is built as an **observable, interruptible, traceable** pipeline（ https://www.seektruth.org.cn/welcome/ ）, not a chat box.
 
 ### 1.2 Business view of one full flow
 
