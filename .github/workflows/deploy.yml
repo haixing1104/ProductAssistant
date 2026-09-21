@@ -10,7 +10,7 @@
 #          secret.`），下游拿到的就是**空字符串** → `docker login` 没有目标 registry，
 #          回落到 Docker Hub 并用 ACR 凭据登录 → 报
 #          `Get "https://registry-1.docker.io/v2/": unauthorized: incorrect username or password`。
-#          （2026-09-20 实测踩坑；排障见 infra/docs/deploy.md §10 #16）
+#          （2026-09-20 实测踩坑；症状：日志里只剩一行 Skip output 'ci_host'）
 # 三种模式（手动触发时选）:
 #   ping      只验证"密钥接线 + 服务器现状"（whoami/软件/目录/证书），**不改服务器任何东西**
 #   bootstrap 一次性初始化：swap / Docker / PostgreSQL(+容器可达) / rsync / 目录与自签证书。
@@ -29,7 +29,6 @@
 #   platform=unknown/unknown 的证明清单），ACR 个人版直接拒绝，报 `denied: unknown manifest`
 #   （5 个应用镜像全挂；而同一 run 里用裸 docker push 转推的 redis/nginx 成功）。
 #   所以：buildx 只负责**构建**（load 进本地 docker），推送统一交给 docker CLI。
-# 完整步骤、验收与排障：infra/docs/deploy.md
 # =============================================================================
 name: 部署到阿里云 ECS
 
@@ -268,7 +267,7 @@ jobs:
           echo; echo "== 部署目录 =="
           ls -la /srv/pa 2>/dev/null || echo NO_DEPLOY_DIR
           echo; echo "== 关键文件 =="
-          [ -f /srv/pa/infra/.env ] && echo "infra/.env    : 已存在" || echo "infra/.env    : 缺失（见 docs §4）"
+          [ -f /srv/pa/infra/.env ] && echo "infra/.env    : 已存在" || echo "infra/.env    : 缺失（在服务器 infra/ 下 cp .env.template .env 后逐项填真值）"
           [ -f /srv/pa/infra/nginx/certs/fullchain.pem ] && echo "证书          : 已存在" || echo "证书          : 缺失（mode=bootstrap 会补自签兜底）"
           echo; echo "== 容器 =="
           docker ps --format '{{.Names}}\t{{.Status}}' 2>/dev/null || true
@@ -296,7 +295,7 @@ jobs:
           remote_registry="$(ssh -F ~/.ssh/pa_deploy pa-deploy "grep -E '^PA_IMAGE_REGISTRY=' ${REMOTE_DIR}/infra/.env | cut -d= -f2-" || true)"
           echo "服务器 infra/.env ：${remote_registry}"
           echo "CI 常量（VPC）    ：${ACR_VPC_REGISTRY}"
-          [ "${remote_registry}" = "${ACR_VPC_REGISTRY}" ] || echo "::warning::两者不一致 —— 服务器会用 infra/.env 里的地址拉镜像（若拉取失败请核对 docs §10）"
+          [ "${remote_registry}" = "${ACR_VPC_REGISTRY}" ] || echo "::warning::两者不一致 —— 服务器会用 infra/.env 里的地址拉镜像（若拉取失败：核对 VPC 域名、docker login 凭据与 .env 里的镜像地址）"
           # ③ 发布（脚本内含：迁移 → pull → up → edge reload → prod-verify 验收）
           ssh -F ~/.ssh/pa_deploy pa-deploy "cd ${REMOTE_DIR} && ./infra/scripts/prod-deploy.sh '${IMAGE_TAG}'"
 
@@ -315,7 +314,7 @@ jobs:
             echo ""
             echo "回滚（在服务器上）：\`/srv/pa/infra/scripts/prod-deploy.sh --rollback\`"
             echo ""
-            echo "验收：\`/srv/pa/infra/scripts/prod-verify.sh\`　·　排障：\`infra/docs/deploy.md §10\`"
+            echo "验收：\`/srv/pa/infra/scripts/prod-verify.sh\`　·　排障：先 \`compose ps\` → 容器日志 → \`edge nginx -t\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
 

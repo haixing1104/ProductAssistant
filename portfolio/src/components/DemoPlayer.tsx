@@ -71,7 +71,7 @@ export default function DemoPlayer({ clip, label, aspect, note }: DemoPlayerProp
       </span>
       <p className="max-w-md text-sm text-ink-700 dark:text-ink-100/80">{source.note}</p>
       <p className="text-xs text-ink-500 dark:text-ink-100/50">
-        资产就位后此处自动替换为演示动图 / 视频（见 portfolio/README.md）
+        资产就位后此处自动替换为演示动图 / 视频
       </p>
     </div>
   );

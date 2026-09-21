@@ -3,7 +3,7 @@
 权限边界:
     本仓储只服务 admin 的成员管理（``/users``）与登录鉴权所需的按名查找。
     ``sys_users`` 对 ``role_pa_ai`` **零权限**（`0002_roles_grants.sql`）——
-    所以 ai-engine 侧只能拿到 ``approver_id``，姓名要由本模块 join 后下发（见 backend-api/README §2.6）。
+    所以 ai-engine 侧只能拿到 ``approver_id``，姓名要由本模块 join 后下发。
 """
 
 from __future__ import annotations

@@ -13,9 +13,8 @@
 #   · 不映射宿主端口 —— 只挂内部网络，由 backend / ai-engine 通过服务名访问；
 #     确需跨机访问时上 TLS + 防火墙白名单，绝不暴露公网。
 #   · 高危命令禁用 —— FLUSHALL / FLUSHDB / CONFIG / KEYS 在「队列实例」上没有正当用途，
-#     误调用一次即全量丢数据。需要更细粒度隔离时改用 ACL（按 key 前缀 pa:{env}:* 授权，见 docs）。
+#     误调用一次即全量丢数据。需要更细粒度隔离时改用 ACL（按 key 前缀 pa:{env}:* 授权）。
 #
-# 配套文档: infra/docs/redis-production.md（托管 Redis 清单 / 监控告警 / 备份与演练）
 # =============================================================================
 
 name: productassistant-redis-prod

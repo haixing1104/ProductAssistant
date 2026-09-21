@@ -17,7 +17,7 @@ import { defineConfig } from "vite";
 //     · 生产产物引用打成 /welcome/assets/…，与边缘 nginx 的 `proxy_pass http://pa-portfolio/;`
 //       （剥离 /welcome/ 前缀）对齐，静态容器里仍然是 /assets/…；
 //     · dev（:5175）与 vitest 仍挂在根路径，`scripts/dev-landing.sh` 的探活
-//       （curl http://localhost:5175/）与 portfolio/README.md 的验收命令一行都不用改。
+//       （curl http://localhost:5175/）与既有验收命令一行都不用改。
 //   lib/asset.ts 的 publicFile() 会跟随 base，所以页面代码无需改动。
 export default defineConfig(({ mode }) => ({
   base: mode === "production" ? "/welcome/" : "/",

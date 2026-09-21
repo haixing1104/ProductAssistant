@@ -55,7 +55,7 @@ check "移动端 H5 /m/"       "${BASE}/m/"         200 'id="root"'
 check "宣传页 /welcome/"    "${BASE}/welcome/"   200 'id="root"'
 
 if [ "${FAILED}" = "1" ]; then
-  echo "[verify] ✗ 验收未通过 —— 排障顺序见 infra/docs/deploy.md §10"
+  echo "[verify] ✗ 验收未通过 —— 排障顺序：compose ps → 容器日志 → edge nginx -t"
   exit 1
 fi
 echo "[verify] ✓ 全部通过"

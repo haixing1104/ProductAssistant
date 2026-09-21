@@ -2,7 +2,7 @@
 
 为什么 backend 要再写一份（而不是 import ai-engine 的实现）:
     仓库红线：backend-api 与 ai-engine 是**可独立替换语言实现**的两个模块，不共享代码
-    （见 README「模块之间互相解耦，方便更换其他语言实现」）。所以 keyspace 只能靠
+    （模块之间互相解耦，方便更换其他语言实现）。所以 keyspace 只能靠
     「同名同义 + 两侧各自单点」维持一致：本文件是 backend 侧唯一出处，改键名必须同步
     ``ai-engine/src/adapters/redis_eventbus.py::RedisKeys`` —— 否则链路会**静默断掉**
     （投出去没人消费 / 等一个永远不来的结果），这类故障最难排查。

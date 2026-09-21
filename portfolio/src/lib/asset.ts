@@ -52,7 +52,7 @@ export const PLACEHOLDER_NOTE = "演示录制中";
 /**
  * 决定一段（或一整个端）用哪种形态渲染：**video 优先、其次 gif、最后占位**。
  *
- * 这个优先级只写一次（组件与测试共用），避免「组件里 if 的顺序」和「README 的说明」各说一套。
+ * 这个优先级只写一次（组件与测试共用），避免「组件里 if 的顺序」与「测试的期望」各说一套。
  */
 export function resolveDemoSource(resource: DemoResource): DemoSource {
   if (resource.video) {

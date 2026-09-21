@@ -4,7 +4,7 @@
     权限矩阵的意义就在于**越权写入必须失败**。只断言「正常写入成功」测不出矩阵是否真的生效 ——
     某天有人把 GRANT 放宽（或把代码里的角色换成 admin），功能测试依然全绿，红线却已经没了。
 
-覆盖（与 backend-api/README §六 的红线清单一一对应）:
+覆盖（三条架构红线，逐条断言「越权必被拒」）:
     ① ``role_pa_backend`` 写 ``schema_pa_ai.product_contents`` 必须被拒（AI 域归 ai-engine）；
     ② ``role_pa_backend`` 对 ``delete_audits`` 的 UPDATE / DELETE 必须被拒（审计只能追加）；
     ③ ``role_pa_backend`` 对 ``job_abort_audits``（0005 运维终止审计）同上。

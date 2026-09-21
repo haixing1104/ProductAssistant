@@ -20,7 +20,7 @@ checkpoint 生命周期：
   · 进程内单例（new_pg_checkpointer：PostgresSaver + psycopg 连接池，落 schema_pa_ai），
     由 _get_checkpointer() 懒建、各任务复用；进程退出由 close() 释放连接池。
 
-可靠性（队列级；运维口径见 infra/docs/redis-production.md，验收脚本 infra/scripts/redis-verify.sh）：
+可靠性（队列级；验收脚本 infra/scripts/redis-verify.sh）：
   · PEL 回收：每轮消费前 claim_stale()（XAUTOCLAIM）接管「空闲超时未 ack」的消息；
     投递次数达上限或消息体非法 → move_to_dlq() 转 pa:{env}:dlq:{流}（先写死信再 ack）；
   · 毒消息与慢任务区分：线程锁仍在 → 跳过回收（保护正常慢任务），锁已释放却仍未 ack 才是毒消息；

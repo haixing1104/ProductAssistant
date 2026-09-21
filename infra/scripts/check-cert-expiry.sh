@@ -10,7 +10,6 @@
 #        1 = 证书缺失 / 已过期 / 剩余不足 / 是自签（调用方据此打 ::warning:: 或告警）
 # 调用 : prod-deploy.sh 在验收后跑一次（只告警、**不阻断发布**）；也可手工或 cron 跑。
 # 说明 : 只读脚本 —— 只解析证书的公钥信息，**绝不打印私钥内容**。
-# 文档 : infra/docs/deploy.md §7.5
 # =============================================================================
 set -euo pipefail
 
@@ -43,7 +42,7 @@ done
 CERT="${CERT_DIR}/fullchain.pem"
 if [ ! -s "$CERT" ]; then
   echo "!! [cert] 未找到证书 ${CERT}"
-  echo "   → edge 的 443 需要它才能启动；首次部署见 docs §7.1（bootstrap 自签兜底），换正式证书见 §7.5"
+  echo "   → edge 的 443 需要它才能启动；首次部署由 prod-bootstrap.sh 自签兜底，换正式证书用 install-cert.sh"
   exit 1
 fi
 
@@ -58,16 +57,16 @@ echo "[cert] 主体=${SUBJ} 签发者=${ISSUER} 有效期至=${END_RAW}（剩余
 
 if [ "$SUBJ" = "$ISSUER" ]; then
   echo "!! [cert] 当前是**自签证书**（issuer == subject）：浏览器会提示「不安全」，"
-  echo "        钉钉/微信内置浏览器可能直接拒绝 → 换正式证书：docs §7.5（阿里云免费证书，90 天）"
+  echo "        钉钉/微信内置浏览器可能直接拒绝 → 换正式证书：infra/scripts/install-cert.sh（阿里云免费证书，90 天）"
   STATUS=1
 fi
 
 if [ "$DAYS_LEFT" -lt 0 ]; then
-  echo "!! [cert] 证书**已过期**（${END_RAW}）：立刻换证 —— docs §7.5"
+  echo "!! [cert] 证书**已过期**（${END_RAW}）：立刻换证 —— ./infra/scripts/install-cert.sh"
   STATUS=1
 elif [ "$DAYS_LEFT" -lt "$WARN_DAYS" ]; then
   echo "!! [cert] 剩余 ${DAYS_LEFT} 天 < ${WARN_DAYS} 天：到阿里云控制台重新下载 → 用"
-  echo "        ./infra/scripts/install-cert.sh <证书链.pem> <私钥.key> 安装（docs §7.5）"
+  echo "        ./infra/scripts/install-cert.sh <证书链.pem> <私钥.key> 安装"
   STATUS=1
 fi
 

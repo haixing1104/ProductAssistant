@@ -67,7 +67,7 @@ async def approver_names(
 
     为什么 backend 要自己 join:
         ``sys_users`` 对 ai-engine **零权限**，审批链路上只有 ``approver_id``；
-        而审批历史必须显示「谁批的」——只有 backend 能补全（见 README §2.6 第 4 条）。
+        而审批历史必须显示「谁批的」——只有 backend 能补全。
 
     参数:
         session: DB 会话。

@@ -10,7 +10,7 @@ langgraph>=1.2,<2.0
 langgraph-checkpoint-postgres>=3.1,<4.0   # PostgresSaver（P4 启用，建表走 role_pa_ai_setup）
 psycopg[binary]>=3.3,<3.4                  # 运行期 PQ 驱动（adapters/pg_store.py）；slim 镜像无 libpq，须装 binary
 psycopg-pool>=3.2,<4.0                     # PostgresSaver 连接池（langgraph-checkpoint-postgres 的传递依赖，此处显式锁定）
-langchain-openai>=1.6,<2.0                # 或 openai>=3.8,<4.0（二选一，见 README）
+langchain-openai>=1.6,<2.0                # 或 openai>=3.8,<4.0（二选一）
 pymilvus>=2.6,<2.7                        # RAG 向量库（Milvus 2.6.x）
 pillow>=11,<12                            # 图片规格化：统一尺寸/格式/背景 + AI 标识元数据（adapters/image_pillow.py）
 redis>=8.1,<9.0                           # EventBus（Redis Streams，P4 启用）

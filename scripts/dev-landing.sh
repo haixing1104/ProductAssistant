@@ -8,12 +8,12 @@
 # 用法    : ./scripts/dev-landing.sh              # npm run dev → http://localhost:5175（Ctrl-C 停）
 #           ./scripts/dev-landing.sh --typecheck  # npx tsc --noEmit（必须 0 错误）
 #           ./scripts/dev-landing.sh --test       # npm test（Vitest + RTL）
-#           ./scripts/dev-landing.sh --test-cov   # 覆盖率（门禁 stmts 80 / branch 75 / func 75 / lines 80，见 portfolio/README）
+#           ./scripts/dev-landing.sh --test-cov   # 覆盖率（门禁在 portfolio/vite.config.ts：stmts 80 / branch 75 / func 75 / lines 80）
 #           ./scripts/dev-landing.sh --build      # npm run build（tsc --noEmit && vite build）
 #           ./scripts/dev-landing.sh --preview    # npm run preview（看构建产物）
 #           -h, --help    显示本帮助
 # 退出码  : 透传对应 npm/npx 命令的退出码；前置自检失败 = 1；未知参数 = 2。
-# 说明    : 端口占用**不静默换端口**（与 dev-up.sh 同口径：5175 写在 vite strictPort 与文档里），
+# 说明    : 端口占用**不静默换端口**（与 dev-up.sh 同口径：5175 写在 vite strictPort 里），
 #           占用时直接指名占用者并给处置命令；依赖未装同样给出确切的安装命令。
 # =============================================================================
 set -euo pipefail
@@ -69,7 +69,7 @@ fi
 # 只有 dev 争 5175（vite strictPort 写死）；preview 用 vite 自己的默认端口，不做占用检查
 if [ "${TASK}" = "dev" ] && port_busy "${PORT}"; then
   err "端口 ${PORT} 已被占用（$(port_owner "${PORT}" || true)）"
-  echo "     本模块不静默换端口：5175 写在 vite strictPort 与 portfolio/README 里。" >&2
+  echo "     本模块不静默换端口：5175 写在 vite strictPort 里。" >&2
   echo "     处置：停掉占用者（若是上次遗留的 vite：pkill -f \"${ROOT_DIR}/portfolio/node_modules/[.]bin/vite\"）后重试。" >&2
   exit 1
 fi

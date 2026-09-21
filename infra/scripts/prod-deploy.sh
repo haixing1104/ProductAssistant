@@ -6,7 +6,7 @@
 # 用法 : ./infra/scripts/prod-deploy.sh <镜像tag>      # 正常发布（tag 一般 = git sha）
 #        ./infra/scripts/prod-deploy.sh --rollback     # 回滚到上一次成功发布的 tag
 # 前置 : infra/.env 已就绪（密钥只存在于服务器）；docker compose 已安装（见 prod-bootstrap.sh）
-# 幂等 : 可反复执行。迁移脚本 forward-only 且幂等（见 database/sql 与 docs §5）。
+# 幂等 : 可反复执行。迁移脚本 forward-only 且幂等（见 database/sql 与 pgsql-setup.sh）。
 #
 # 五步的**顺序即语义**（每一步都在解决一个具体的坑）:
 #   1) ACR 登录      —— 若 .acr-creds 存在（CI 经 stdin 写入）就用它登录并**立即删除**；
@@ -19,7 +19,7 @@
 #                        这里 reload 会重新解析域名（零停机）。
 #   ※ 另有一步**不编号**（在第 5 步之后、验收之前）：跑一次「证书有效期自检」——
 #      阿里云免费证书只有 90 天，且 bootstrap 的自签兜底证书有 10 年有效期（靠"到期"永远发现不了），
-#      所以每次发布都查一遍"是否自签 / 剩余多少天"，只打 ::warning::、**不影响发布结论**（docs §7.5）。
+#      所以每次发布都查一遍"是否自签 / 剩余多少天"，只打 ::warning::、**不影响发布结论**。
 # 最后 : prod-verify.sh 做端到端验收（不通过则退出码非 0）+ 写 .deploy-tag 作为回滚锚点。
 # =============================================================================
 set -euo pipefail
@@ -38,7 +38,7 @@ step() { echo; echo "===== $* ====="; }
 
 # --- 前置检查（失败要给出可执行的下一步，而不是一句 "error"）------------------
 [ -f "${ENV_FILE}" ] || {
-  echo "!! 缺少 ${ENV_FILE} —— 生产密钥只存在于服务器：见 infra/docs/deploy.md §4" >&2
+  echo "!! 缺少 ${ENV_FILE} —— 生产密钥只存在于服务器：cp infra/.env.template infra/.env 后逐项填真值" >&2
   exit 1
 }
 command -v docker >/dev/null 2>&1 || { echo "!! 未安装 Docker（先跑 prod-bootstrap.sh）" >&2; exit 1; }
@@ -76,7 +76,7 @@ if [ -s "${CREDS_FILE}" ]; then
   log "已登录 ${reg_host}（凭据文件已删除）"
 else
   # 没有临时凭据：依赖 ~/.docker/config.json 里既有的登录（首次 bootstrap 时可手工登录一次）
-  log "无 ${CREDS_FILE}：沿用 docker 已保存的凭据（若拉取报 unauthorized，见 docs §10）"
+  log "无 ${CREDS_FILE}：沿用 docker 已保存的凭据（若拉取报 unauthorized：核对 ACR 凭据与 .env 里的镜像地址）"
 fi
 
 step "2/5 数据库迁移（forward-only；只应用未执行过的文件，记录在 public.schema_migrations）"
@@ -105,18 +105,18 @@ step "5/5 重载边缘 nginx（重新解析 upstream；否则后端换 IP 后持
 # 因此这里做两件事：① 重载失败**显式报错**（原来 `exec … && log` 会把失败吞成静默跳过，
 # 排障时看不到任何线索）；② 验收带**有上限的重试窗口**（见下一步），只有持续失败才判红。
 if ! "${COMPOSE[@]}" exec -T edge nginx -s reload; then
-  echo "!! edge reload 失败 —— 先在服务器上跑：${COMPOSE[*]} exec -T edge nginx -t（见 docs §10）" >&2
+  echo "!! edge reload 失败 —— 先在服务器上跑：${COMPOSE[*]} exec -T edge nginx -t" >&2
   exit 1
 fi
 log "edge 已 reload（异步生效；随后的验收会在重试窗口内等它）"
 
-step "证书有效期自检（只告警；不影响发布结论 —— 换证见 infra/docs/deploy.md §7.5）"
+step "证书有效期自检（只告警；不影响发布结论 —— 换证用 infra/scripts/install-cert.sh）"
 # 为什么要跟发布一起跑：阿里云免费证书只有 90 天，而过期/自签都不会让"容器健康检查"变红，
 # 唯一的表现是浏览器告警（甚至钉钉/微信内置浏览器直接拒绝）。把提醒放进每次发布的日志里，
 # 是最不依赖人的做法。判据与处置见 check-cert-expiry.sh 的头部注释。
 if ! cert_out="$(./infra/scripts/check-cert-expiry.sh --warn-days 21 2>&1)"; then
   printf '%s\n' "${cert_out}"
-  echo "::warning::edge 证书需要处理（自签 或 剩余<21 天）—— 用 infra/scripts/install-cert.sh 换证（docs §7.5）"
+  echo "::warning::edge 证书需要处理（自签 或 剩余<21 天）—— 用 infra/scripts/install-cert.sh 换证"
 else
   printf '%s\n' "${cert_out}"
 fi
@@ -124,7 +124,7 @@ fi
 step "验收（走回环 + Host 头验证 nginx→应用全链路；最多 6 次、间隔 5s）"
 # 为什么要重试：起栈后容器是"刚重建"的状态，edge 的 upstream 也需要一个重载生效窗口。
 # 单次验收撞上窗口期就判红等于把"部署成功"交给了运气 —— 部署脚本必须容忍"刚起来还没热"，
-# 但也不能无限等：6 次 × 5s 约 25s 的上限内仍失败，说明确实是坏消息（继续排障 → docs §10）。
+# 但也不能无限等：6 次 × 5s 约 25s 的上限内仍失败，说明确实是坏消息（继续排障：compose ps → 容器日志 → edge nginx -t）。
 verify_ok=0
 for attempt in $(seq 1 6); do
   if out="$(./infra/scripts/prod-verify.sh 2>&1)"; then
@@ -139,12 +139,12 @@ for attempt in $(seq 1 6); do
   fi
 done
 [ "${verify_ok}" = "1" ] || {
-  echo "!! 验收连续 6 次未通过（约 25s 窗口）—— 排障顺序见 infra/docs/deploy.md §10" >&2
+  echo "!! 验收连续 6 次未通过（约 25s 窗口）—— 排障顺序：compose ps → 容器日志 → edge nginx -t" >&2
   exit 1
 }
 
 # 记录发布锚点：当前 tag 记为 .deploy-tag，上一个成功 tag 记为 .deploy-tag.prev
-# （回滚 = 读 .deploy-tag.prev → 用它 up -d；DB 迁移**不回滚**，见 docs §8）
+# （回滚 = 读 .deploy-tag.prev → 用它 up -d；DB 迁移**不回滚**）
 if [ "${MODE}" = "deploy" ] && [ -s "${TAG_FILE}" ] && [ "$(cat "${TAG_FILE}")" != "${TAG}" ]; then
   cp -f "${TAG_FILE}" "${PREV_TAG_FILE}"
 fi

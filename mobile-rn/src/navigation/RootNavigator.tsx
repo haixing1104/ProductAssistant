@@ -49,7 +49,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
  * 深链前缀：
  *   · 自定义 scheme（开发期用 `npx uri-scheme open productassistant://approvals/xxx?ticket=yyy`）；
  *   · 桌面端域名（生产环境真正的"点通知直接进 App"要靠 Universal Link / App Link 关联文件，
- *     那属于 infra 与域名配置，见 README 的「真机验证清单」——本轮只保证路径能解析）。
+ *     那属于 infra 与域名配置 —— 本轮只保证路径能解析）。
  */
 const linking = {
   prefixes: ["productassistant://", `${resolveDesktopBaseUrl()}/`],

@@ -5,8 +5,8 @@
     （由投递器决定重试/退避/DLQ）—— 适配器不自行吞错，否则「通知没发出去」会变成静默失败。
 
 为什么只实装钉钉:
-    ``infra/.env.template`` 当前只登记了 ``NOTIFY_DINGTALK_WEBHOOK_URL``（README 也写明
-    「当前只实现了钉钉」）。加飞书/邮件时只需在此新增一个 sender 并在 ``resolver`` 里挂上，
+    ``infra/.env.template`` 当前只登记了 ``NOTIFY_DINGTALK_WEBHOOK_URL`` —— 即**当前只实现了钉钉**。
+    加飞书/邮件时只需在此新增一个 sender 并在 ``resolver`` 里挂上，
     写入侧与投递器**一行都不用改** —— 这正是 outbox 的价值。
 
 钉钉细节（踩过的点）:

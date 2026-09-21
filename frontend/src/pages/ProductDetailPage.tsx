@@ -4,7 +4,7 @@
 //   · 详情接口带 `active_job_status` / `active_job_error` → 「生成中」按钮态与失败原因据此判断，
 //     不必靠猜（PP 无此字段）；
 //   · **PA 没有 `last_reject_*` 字段**：驳回复盘走 `GET /approvals?product_id=…`（历史审批单，
-//     带完整 `content_snapshot` 与 `feedback`）—— 这是 PA 的等价能力（见 backend README §2.6）；
+//     带完整 `content_snapshot` 与 `feedback`）—— 这是 PA 的等价能力；
 //   · 图片上传：`POST /oss/presign` 需要 product_id → 三步（换 URL → 浏览器 PUT → PATCH 整体覆盖 raw_images）；
 //   · 流可重连：服务端空闲关流（注释帧）→ 连接器自动带 Last-Event-ID 续连；
 //     `hitl.waiting` 是**终态**（等待审批可能数小时）→ 停止，审批后回来点「连接实时流」即可。
@@ -149,7 +149,7 @@ export default function ProductDetailPage() {
   // 审批与驳回复盘：按 product_id 查历史（**必须显式 status=all**；带完整快照）
   // 历史事故（2026-09）：这里只传 product_id + with_snapshot，而 backend 的缺省语义是
   // status=pending → 已定案（批准/驳回）的单永远查不到 → 卡片恒显示「还没有审批记录」，
-  // 「驳回后看不到被驳回的图文」正是这么来的。契约见 backend README §2.6。
+  // 「驳回后看不到被驳回的图文」正是这么来的。复盘契约 = 显式 status=all + 带快照。
   const approvals = useQuery({
     queryKey: ["approvals", "product", productId],
     queryFn: () =>

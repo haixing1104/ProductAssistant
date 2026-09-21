@@ -154,7 +154,7 @@ container_health() { docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/nu
 # lan_ip：本机在局域网里的地址（只用于打印「真机联调该填哪个地址」，不参与任何判定）。
 #   · 首选 `ip route get`：它给的是**默认路由实际使用的源地址** —— WSL2 镜像模式（.wslconfig 的
 #     networkingMode=mirrored）下直接得到宿主机 Wi-Fi IP，正是手机可达的那个地址；
-#     NAT 模式下得到的是 WSL 虚拟网段地址（手机本来就到不了，见 mobile-rn/README「WSL2 联调」）；
+#     NAT 模式下得到的是 WSL 虚拟网段地址（手机本来就到不了：需改镜像网络模式或做端口转发）；
 #   · 回落 `hostname -I` 的第一个（多网卡/容器环境里不保证正确，仅兜底）。
 lan_ip() {
   local ip=""
@@ -335,7 +335,7 @@ for port in "${PORTS_TO_CHECK[@]}"; do
   fi
 done
 if [ "${BLOCKERS}" = "1" ]; then
-  echo "     本脚本不静默换端口：8000 写在 vite 代理里、5173/5174 写在文档与 strictPort 约定里。" >&2
+  echo "     本脚本不静默换端口：8000 写在 vite 代理里、5173/5174 写在 vite strictPort 约定里。" >&2
   echo "     处置：./scripts/dev-down.sh（收掉上次遗留进程），或手工停掉占用者后重试。" >&2
   exit 1
 fi

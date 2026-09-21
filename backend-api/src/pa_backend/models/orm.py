@@ -110,7 +110,7 @@ class HitlApproval(_TimestampMixin, Base):
     """人工审批记录（CAS 状态机 ``pending→approved|rejected``）。
 
     ``content_snapshot``：转人工时由 ``result:workflow`` 携带、本模块落库的「AI 生成详情」快照
-    （结构见 backend-api/README §2.3）——批准前文案不落 ``product_contents``，审批人只能看它。
+    ——批准前文案不落 ``product_contents``，审批人只能看它。
     """
 
     __tablename__ = "hitl_approvals"
@@ -134,10 +134,10 @@ class HitlApproval(_TimestampMixin, Base):
 class ComplianceWord(_TimestampMixin, Base):
     """违禁词（确定性规则层数据源）。
 
-    **无 ``org_id``**：规则表是全局的（README 明确「除规则表外都带 org_id」），
+    **无 ``org_id``**：规则表是全局的（其余业务表都带 ``org_id``），
     因此入队快照也是全局的，越权防护靠「只有 admin 能改」（P6 的 CRUD）。
     时效窗口（``effective_at``/``expires_at``）在**入队瞬间**由 backend 过滤
-    —— ai-engine 侧不做时间过滤（见 backend-api/README §2.6）。
+    —— ai-engine 侧不做时间过滤（这是本表的入队快照语义）。
     """
 
     __tablename__ = "compliance_words"
@@ -166,7 +166,7 @@ class GenerationJob(_TimestampMixin, Base):
     """AI 生成任务的**权威状态源**（``thread_id`` 全表唯一）。
 
     全链路幂等的锚点：``products.active_thread_id`` 指向当前线程，本表回答「这个线程现在什么状态」。
-    ``timings`` / ``llm_usage`` 列已存在，但 ai-engine 目前未回传计量（README todo）→ 保持默认 ``{}``。
+    ``timings`` / ``llm_usage`` 列已存在，但 ai-engine 目前未回传计量（已知缺口）→ 保持默认 ``{}``。
     """
 
     __tablename__ = "generation_jobs"

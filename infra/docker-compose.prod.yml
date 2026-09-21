@@ -4,16 +4,16 @@
 #        + ai-engine + Redis（生产参数）+ Milvus 组（**可选 profile**）
 # 使用 : docker compose --env-file infra/.env -f infra/docker-compose.prod.yml up -d
 #        （首次初始化 bootstrap、数据库迁移、TLS 证书、日常发布与回滚：
-#          见 infra/docs/deploy.md —— 那份文档与本文的变量/服务名逐一对应）
+#          由 .github/workflows/deploy.yml + infra/scripts/prod-*.sh 承载）
 # 镜像 : 全部来自阿里云 ACR（**一个源**，不依赖 Docker Hub）：
 #        · 应用 5 个：${PA_IMAGE_REGISTRY}:<模块>-${PA_IMAGE_TAG}
 #        · 基础 2 个：${PA_IMAGE_REGISTRY}:redis-7.4-alpine / :nginx-1.27-alpine
 #          （由 deploy.yml 的 mirror-images job 转推；改这里的 tag 必须同步改那个矩阵）
 #        · PA_IMAGE_REGISTRY 在服务器上取 **VPC 域名**（同地域免公网流量费）
 #        · 不在服务器构建：本机实测 2 vCPU / 1608MB 内存，`vite build`/`pip install`
-#          会 OOM；构建统一在 GitHub Actions 完成（见 docs/deploy.md §1）
+#          会 OOM；构建统一在 GitHub Actions 完成
 #
-# 三条硬约束（改错即出事，改前请读 docs/deploy.md 的"关键取舍"）:
+# 三条硬约束（改错即出事，逐条理由见下）:
 #   1) **内部服务一律不写 ports** —— Docker 发布端口会自行写 iptables 的 DOCKER 链，
 #      **绕过 ufw/iptables 规则**；所以"只开 80/443"只能靠「不写 ports + 安全组」保证，
 #      不能靠主机防火墙。唯一写 ports 的是 edge。
@@ -24,7 +24,7 @@
 #      反复重启并把 backend/ai-engine 一起拖死）。未启用时 ai-engine 自动降级：
 #      MILVUS_URI 留空 → RAG 关闭、主链路完整（adapters/milvus_rag_store.py 的设计）。
 #      升配后再 `--profile rag up -d`（启用前需先把三个镜像推一份到 ACR，
-#      因为本机实测 **registry-1.docker.io 直连超时**，见 docs/deploy.md §6）。
+#      因为本机实测 **registry-1.docker.io 直连超时**）。
 #
 # 内存 : 每个服务都有 mem_limit —— 单机内存靠容器上限兜底，避免任一服务失控拖垮全栈。
 #        实测可用内存约 1.1GB，全栈常驻约 0.7~0.9GB；limits 是"防失控上限"而非预期占用。
@@ -67,7 +67,7 @@ services:
     #   nginx 在**配置解析时**就要解析 upstream 域名，名字还不存在时直接 `[emerg] host not
     #   found in upstream` 退出（实测：standalone `nginx -t` 就是这个报错）。等上游 healthy
     #   才启动 edge，既保证名字可解析，也避免"边缘先起、上游还没就绪"这段窗口。
-    # ⚠️ 另一个相关陷阱（运维必读，见 infra/docs/deploy.md §6）：
+    # ⚠️ 另一个相关陷阱（运维必读）：
     #   nginx 把 upstream 解析结果**缓存在内存里**，而每次发布后端容器会被重建并**换新 IP**。
     #   所以 deploy 流程在 `up -d` 之后必须执行一次 `docker compose exec -T edge nginx -s reload`
     #   （reload 会重新解析域名）—— 否则边缘会一直把请求打到已经消失的旧 IP，表现为持续 502。
@@ -224,7 +224,7 @@ services:
   #     启用前置条件（两件都要满足，否则一定失败）:
   #       ① 内存 ≥ 4GB（standalone 起步 ~1.5GB；本机 1.6GB 直接 OOM）
   #       ② 三个镜像已在 ACR 里有一份（本机实测 registry-1.docker.io 直连超时），
-  #          做法见 infra/docs/deploy.md §6；然后把下面三处 image 改成：
+  #          做法：把这三个镜像转推到 ACR，然后把下面三处 image 改成：
   #             ${PA_IMAGE_REGISTRY}:etcd-v3.5.5 / minio-<ver> / milvus-v2.6.1
   #     启用命令: docker compose --env-file infra/.env -f infra/docker-compose.prod.yml \
   #                 --profile rag up -d          # 集合初始化由 milvus-init 一次性完成

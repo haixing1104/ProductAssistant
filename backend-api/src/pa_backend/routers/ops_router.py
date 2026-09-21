@@ -3,7 +3,7 @@
 为什么读面保持只读（不提供「重投 / 清空」这类按钮）:
     运维面板最容易被误用成「一键修复」——而 DLQ 里的消息之所以进 DLQ，是因为**重试到上限仍失败**
     （商品数据异常、外部依赖不可用等）。盲目重投只会再造一条毒消息，还会掩盖根因。
-    因此读面只呈现事实，处置走 README 里的 SOP（人工判断根因后重投或修数据）。
+    因此读面只呈现事实，处置属人工操作（判断根因后重投或修数据）。
 
 唯一的例外：``POST /ops/jobs/{job_id}/abort``（P8 新增）
     卡在 ``running`` 的生成任务会让商品**永久 409**（前端按钮也因 ``status='generating'`` 被禁用），
@@ -63,7 +63,7 @@ async def dlq_entries(
     limit: int = Query(default=20, ge=1, le=DLQ_MAX_ENTRIES),
     user: CurrentUser = Depends(require_roles("admin")),
 ) -> dict:
-    """回看某个死信流的最新消息（只读；处置 SOP 见 backend-api/README）。"""
+    """回看某个死信流的最新消息（只读；处置属人工操作，见本模块顶部说明）。"""
     reader = OpsReader(request.app.state.settings)
     try:
         return ok(await reader.dlq_entries(domain, limit=limit))

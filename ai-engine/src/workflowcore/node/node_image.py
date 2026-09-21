@@ -21,7 +21,7 @@ Content-Type 与对象键:
 合规:
     上传图按实拍图处理（ai_marked=False —— 绝不冒挂 AI 标识）；
     AI 生图产物 ai_marked=True（规格化时写入 AI 生成标识元数据，履行标识义务）。
-    图不进 LLM 评估：评估器只评 generated_content 文本（图-文解耦，见 README 模型选型）。
+    图不进 LLM 评估：评估器只评 generated_content 文本（图-文解耦：评估器不评图片）。
 """
 from __future__ import annotations
 

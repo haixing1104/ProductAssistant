@@ -3,10 +3,10 @@
 边界（``database/sql/0002_roles_grants.sql``）:
     ``compliance_words`` / ``compliance_rules`` 由 ``role_pa_backend`` 全权读写；
     ``role_pa_ai`` 对这些表**零权限** —— 所以规则只能经 ``job:generate`` 载荷随带，
-    这也正是「快照必须在 backend 侧固化」的原因（见 backend-api/README §2.6）。
+    这也正是「快照必须在 backend 侧固化」的原因。
 
 租户维度（容易误判）:
-    这两张表**没有 ``org_id`` 列**（全局规则表，README 明确「除规则表外都带 org_id」）。
+    这两张表**没有 ``org_id`` 列**（全局规则表，其余业务表都带 ``org_id``）。
     因此本仓储不带租户过滤；写侧的越权防护靠「只有 admin 能改」（路由层 ``require_roles``）。
 
 写入口径（P6）:
@@ -172,7 +172,7 @@ class ComplianceRepo:
         return record
 
     async def delete_word(self, record: ComplianceWord) -> None:
-        """删除词条（合规词表是配置数据，允许物理删除；变更留痕见 README 的缺口说明）。"""
+        """删除词条（合规词表是配置数据，允许物理删除；本表无变更历史，属已知缺口）。"""
         await self.session.delete(record)
         await self.session.flush()
 

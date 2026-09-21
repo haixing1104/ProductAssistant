@@ -11,11 +11,10 @@
 # 不做什么 :
 #   · 不碰 infra/.env（密钥文件只存在于服务器，绝不进仓库/CI 日志）；
 #   · 不启用 ufw —— 边界由**阿里云安全组**承担。Docker 发布端口时会自己写 iptables
-#     的 DOCKER 链，**绕过 ufw**，所以 ufw 只会给人"已经防火了"的错觉（见 docs §1）；
-#   · 不装 Milvus 组（2C2G 内存装不下，走 compose 的 rag profile，见 docs §6）。
+#     的 DOCKER 链，**绕过 ufw**，所以 ufw 只会给人"已经防火了"的错觉；
+#   · 不装 Milvus 组（2C2G 内存装不下，走 compose 的 rag profile）。
 # 实测依据 : Ubuntu 22.04.5 / 2 vCPU / 1608MB 内存 / 40G 系统盘 / 已有 1GB swap(/www/swap)
 #            / apt 走 mirrors.cloud.aliyuncs.com / registry-1.docker.io 直连超时。
-# 完整步骤与排障：infra/docs/deploy.md
 # =============================================================================
 set -euo pipefail
 
@@ -109,7 +108,7 @@ docker info >/dev/null 2>&1 || { echo "!! Docker 未就绪（systemctl status do
 
 # ---------------------------------------------------------------------------
 # S3 PostgreSQL（宿主实例）
-#   · 用 Ubuntu 22.04 **自带版本**（README 实测口径：本仓库就跑在 22.04 自带的 14.24 上），
+#   · 用 Ubuntu 22.04 **自带版本**（实测依据：本仓库就跑在 22.04 自带的 14.24 上），
 #     不加 PGDG 源 —— 少一次跨境 apt 环节；
 #   · ⚠️ **必改项**：默认只监听 127.0.0.1，而本项目的应用跑在**容器**里（仓库原则：
 #     pgsql 在本地层、应用在容器层）→ 容器经 host.docker.internal 连宿主会被**直接拒绝**。
@@ -182,7 +181,7 @@ fi
 #   为什么需要自签证书：边缘 nginx 的 443 server **必须在启动时**能读到
 #   /etc/nginx/certs/{fullchain,privkey}.pem，否则直接启动失败 —— 而正式证书要靠
 #   certbot 在我们的 nginx 起来之后（HTTP-01 webroot）才能签发。
-#   所以先自签把栈跑起来，再签正式证书覆盖同名文件 + reload（见 docs §7）。
+#   所以先自签把栈跑起来，再签正式证书覆盖同名文件 + reload。
 # ---------------------------------------------------------------------------
 step "部署目录、证书兜底与 rsync"
 CERT_DIR="${ROOT_DIR}/infra/nginx/certs"
@@ -220,7 +219,7 @@ cat <<EOF
   PostgreSQL    : $(psql --version)
   部署目录       : /srv/pa
   证书目录       : ${CERT_DIR}
-  infra/.env    : $([ -f "${ROOT_DIR}/infra/.env" ] && echo '已存在 → 可执行 mode=deploy' || echo '**尚未创建** → 见 docs/deploy.md §4')
+  infra/.env    : $([ -f "${ROOT_DIR}/infra/.env" ] && echo '已存在 → 可执行 mode=deploy' || echo '**尚未创建** → 在 infra/ 下 cp .env.template .env 后逐项填真值')
 EOF
 log "完成。下一步：确认 infra/.env 就绪 → 触发 deploy.yml 的 mode=deploy"
 

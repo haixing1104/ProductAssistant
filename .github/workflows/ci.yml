@@ -4,7 +4,7 @@
 # 触发 : push 到 master · 任意 pull_request · 手动 workflow_dispatch
 # 设计 :
 #   · 后端与 ai-engine **复用仓库既有的容器化测试编排**（infra/docker-compose.*-test.yml），
-#     不在 CI 里另写一套安装步骤 —— 保证「CI 跑的 = 本地跑的 = README 写的」三者同一口径；
+#     不在 CI 里另写一套安装步骤 —— 保证「CI 跑的 = 本地跑的」同一口径；
 #   · 三个前端各自独立 job（matrix）：**必须整仓 checkout**，因为 mobile-h5 与桌面端
 #     共用契约层（`@pa/core` → ../frontend/src），只取子目录会直接构建失败；
 #   · env-contract 这步挡的是"最贵的一类回归"：代码/compose 新读了一个环境变量，

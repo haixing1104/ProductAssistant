@@ -5,7 +5,7 @@ import { projects } from "../data/projects";
 import { contact, copyText, mailtoUrl } from "../lib/contact";
 
 // 页面级冒烟：挡住「数据加了一条 → 页面崩了」「类名/字段改名忘了同步」这类事故。
-// 不追求渲染细节与样式断言（原子类的可见效果靠浏览器验收，见 portfolio/README.md 的验收清单）。
+// 不追求渲染细节与样式断言（原子类的可见效果靠浏览器真机验收）。
 describe("作品集首页", () => {
   const firstProject = projects[0];
 

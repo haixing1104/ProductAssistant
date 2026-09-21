@@ -1,4 +1,4 @@
-// UI 基座出口（自研薄 UI；**不引任何 UI 依赖** —— 理由见 mobile-rn/README 的 ADR）。
+// UI 基座出口（自研薄 UI；**不引任何 UI 依赖** —— 避免双端样式分叉与包体膨胀）。
 //
 // 组件名刻意与 antd-mobile 对齐（Tag / Card / ListSection / NoticeBar / Tabs / Sheet / ActionSheet /
 // Toast / Dialog），这样页面代码在 H5 与 RN 之间的阅读成本最低，评审时也能逐行对应。

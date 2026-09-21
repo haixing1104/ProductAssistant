@@ -176,7 +176,7 @@ class PgContentStore:
             psycopg.Error: 数据库错误（连接失败、权限不足等）。
         注意:
             本方法只删表行、不碰对象存储；OSS 图片需先经 list_image_urls()
-            取出 URL 再由上层 delete_urls 清理（顺序约束见 list_image_urls 文档）。
+            取出 URL 再由上层 delete_urls 清理（顺序约束见 list_image_urls 的 docstring）。
         """
         with _connect(self._dsn) as conn:
             cur = conn.execute(
@@ -288,7 +288,7 @@ class PgProductsReader:
     schema_pa_backend.products TO role_pa_ai`，写入权限一律不授予 ai-engine。
 
     注意:
-        ports/ 侧当前没有对应的 ProductsReader 端口抽象（见 README 的端口清单），
+        ports/ 侧当前没有对应的 ProductsReader 端口抽象，
         本类属适配器侧直读；仅读取生成所需字段且返回 dict，避免把 backend 域表结构
         泄漏给上游节点。
     """
@@ -522,7 +522,7 @@ def list_pa_thread_ids(dsn: str, *, org_id: str, product_id: str) -> list[str]:
     注意:
         用途：admin 彻底删除商品时，先取出该商品关联的线程，再逐个
         LangGraph PostgresSaver.delete_thread() 清理 checkpoints /
-        checkpoint_blobs / checkpoint_writes（此前无人清理，见 README 遗留项）；
+        checkpoint_blobs / checkpoint_writes（此前无人清理，属已知遗留项）；
         thread_id 列类型为 uuid，此处统一转 str 以匹配 LangGraph 的字符串线程键。
     """
     with _connect(dsn) as conn:

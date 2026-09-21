@@ -19,7 +19,7 @@
     而缺省语义是 pending —— 这正是 2026-09「驳回后详情页看不到内容」的根因。
 
 连接信息（``approver_name`` / ``notifications``）为什么由 backend 补:
-    见 README §2.6：``sys_users`` 对 ai-engine 零权限、``notification_outbox`` 是 backend 域数据，
+    原因：``sys_users`` 对 ai-engine 零权限、``notification_outbox`` 是 backend 域数据，
     审批人姓名与「通知发出去没有」只有在 backend 侧才能 join 出来。
 """
 

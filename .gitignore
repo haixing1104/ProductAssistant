@@ -6,7 +6,7 @@ infra/backups/
 
 # --- 演示素材母带（原始录屏 / 导出 mp4，几百 MB 级且可再生，不入库）---
 # 作品集页面用的是压缩后的产物：portfolio/public/demos/<slug>/<platform>/<key>.<ext>
-# 母带留在本机（或对象存储）即可；压缩命令见 portfolio/public/demos/pa/README.md
+# 母带留在本机（或对象存储）即可；入库前用 gifsicle -O3 无损优化
 demo-index/
 demo-index-mp4/
 

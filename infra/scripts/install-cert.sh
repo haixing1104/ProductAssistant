@@ -25,7 +25,6 @@
 #        ② 证书目录已在 .gitignore 与 CI 的 rsync 排除项里 → 发布不会覆盖证书，
 #           因此**换证必须手工跑本脚本**（到期时间见 infra/scripts/check-cert-expiry.sh）；
 #        ③ 依赖 GNU date（Ubuntu 22.04 服务器口径），本脚本面向服务器侧运行。
-# 文档 : infra/docs/deploy.md §7.5（阿里云免费证书换证 SOP）
 # =============================================================================
 set -euo pipefail
 
@@ -203,7 +202,7 @@ rollback() {
 if [ "$DO_RELOAD" = "0" ]; then
   log "--no-reload：跳过 nginx -t / reload（本次仅安装）"
 else
-  command -v docker >/dev/null 2>&1 || { rollback; die "未安装 docker —— 无法验证配置（见 docs §3）"; }
+  command -v docker >/dev/null 2>&1 || { rollback; die "未安装 docker —— 无法验证配置（先跑 prod-bootstrap.sh）"; }
   cd "$ROOT_DIR"
   if ! "${COMPOSE[@]}" exec -T edge nginx -t; then
     rollback
@@ -238,5 +237,5 @@ cat <<EOF
     ./infra/scripts/check-cert-expiry.sh    # 到期前 21 天起告警
     · 浏览器：地址栏应出现「锁」；钉钉/微信内置浏览器可正常打开
     · 清理私钥副本：rm -f /tmp/new-privkey.pem
-    · 换证 SOP 与到期提醒：infra/docs/deploy.md §7.5
+    · 到期提醒：./infra/scripts/check-cert-expiry.sh（换证即重跑本脚本）
 EOF
