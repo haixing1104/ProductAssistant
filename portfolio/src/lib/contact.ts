@@ -1,16 +1,23 @@
-// 联系方式与「复制邮箱」——整站只有这一份联系信息，组件不允许硬编码邮箱。
+// 联系方式（邮箱 + GitHub）与「复制邮箱」——整站只有这一份联系信息，
+// 组件不允许硬编码邮箱或 GitHub 地址。
 
 export type Contact = {
   /** 页面上展示的署名（改这里就改整站）。 */
   displayName: string;
   email: string;
-  /** 可选：源码仓库主页。留空则不渲染该入口。 */
+  /**
+   * 可选：源码仓库主页（页脚按钮）。留空则不渲染该入口。
+   *
+   * 只填**公开**仓库：私有仓库访客点开是 404，而静态页上没人能及时发现。
+   * 本仓已验证为 public（GitHub API `private=false` / 仓库页 200），所以可以放。
+   */
   github?: string;
 };
 
 export const contact: Contact = {
   displayName: "haixing",
   email: "haixing1104@gmail.com",
+  github: "https://github.com/haixing1104/ProductAssistant",
 };
 
 /**

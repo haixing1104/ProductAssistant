@@ -101,7 +101,7 @@ ai-engine: rag_retrieve → agent_research(read-only research) → generate(stre
 | P0~P6 | Contract freeze, backend skeleton and authentication, product CRUD with hard delete, generation loop with approval CAS, SSE, compliance word lists and the read-only ops surface |
 | P7~P11 | PC console, two-layer nginx production setup + CI/CD, mobile H5, native app, portfolio landing page |
 | Known limits | Compliance decisions for real marketplaces (Taobao / JD / Pinduoduo) are not integrated yet |
-| Test coverage | Database 102 cases · backend 194 · ai-engine 239 · four front ends with their own suites (desktop 92 / H5 24 / native 66 / portfolio 53) |
+| Test coverage | Database 102 cases · backend 194 · ai-engine 239 · four front ends with their own suites (desktop 92 / H5 24 / native 66 / portfolio 55) |
 
 ---
 
@@ -656,4 +656,4 @@ also the precondition for "a solo project still dares to run destructive tests".
 | Desktop | 92 | page semantic guard rails / SSE control frames / approval trail |
 | Mobile H5 | 24 | the key interactions sharing the desktop's semantics |
 | Native app | 66 | screen interactions and the shared contract layer |
-| Portfolio | 53 | "declare, then verify" and other static page gates |
+| Portfolio | 55 | "declare, then verify" and other static page gates |

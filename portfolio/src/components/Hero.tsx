@@ -1,6 +1,5 @@
-import { contact, mailtoUrl } from "../lib/contact";
-
-// Hero：三件事 —— 一句定位、三条事实、两个动作（看作品 / 发邮件）。
+// Hero：三件事 —— 一句定位、三条事实、一个动作（看作品）。
+// 邮件 / GitHub 只出现在页脚联系区：同一动作不在首屏与底栏重复，首屏只留一个决策点。
 // 刻意不放头像与装饰图：纯 CSS 背景光晕 + 文字，首屏无图片请求（静态托管的秒开靠这个）。
 
 const FACTS = [
@@ -26,7 +25,7 @@ export default function Hero() {
           全栈工程 · 多端交付
         </h1>
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-ink-700 dark:text-ink-100/85">
-          把一条业务链路从数据库做到三端界面：后端网关、AI 编排、桌面工作台、移动端 H5 与原生 App，全部自己落地。
+          把一条业务，从数据库做到三端界面：后端网关、AI 编排（人工审批介入）、桌面工作台、移动端 H5 与原生 App，全链路落地。
         </p>
 
         <dl className="mt-10 flex flex-wrap gap-x-10 gap-y-4">
@@ -41,9 +40,6 @@ export default function Hero() {
         <div className="mt-10 flex flex-wrap gap-3">
           <a className="btn-primary" href="#projects">
             查看作品 ↓
-          </a>
-          <a className="btn-ghost" href={mailtoUrl(contact.email, "来自作品集的联系")}>
-            邮件联系我
           </a>
         </div>
       </div>

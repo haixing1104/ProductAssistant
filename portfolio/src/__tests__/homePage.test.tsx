@@ -17,13 +17,31 @@ describe("作品集首页", () => {
     expect(screen.getByText(firstProject.tagline)).toBeInTheDocument();
   });
 
-  it("联系区有邮箱：既能点开发邮件，也能一键复制", () => {
+  it("联系区有三种联系途径：发邮件 / 一键复制 / GitHub 源码仓库", () => {
     render(<App />);
 
     const footer = screen.getByRole("contentinfo");
     const mailLink = within(footer).getByRole("link", { name: contact.email });
     expect(mailLink).toHaveAttribute("href", expect.stringContaining(`mailto:${contact.email}`));
     expect(within(footer).getByRole("button", { name: "复制邮箱" })).toBeInTheDocument();
+
+    // GitHub 入口：新窗口打开 + `rel` 带 noreferrer（不把来源页交给对方）
+    const githubLink = within(footer).getByRole("link", { name: "GitHub" });
+    expect(githubLink).toHaveAttribute("href", contact.github);
+    expect(githubLink).toHaveAttribute("target", "_blank");
+    expect(githubLink).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+  });
+
+  // 首屏关于「联系」什么都不放：邮件 / GitHub 一律只在页脚 —— 同一个动作在页面里只出现一次。
+  // 这条负向断言钉住的就是「去重复」本身：谁把邮件按钮加回首屏，它立刻变红。
+  it("首屏不留联系方式（全站唯一出口是页脚）", () => {
+    render(<App />);
+
+    const hero = screen.getByRole("banner");
+    expect(within(hero).queryByRole("link", { name: /邮件|GitHub/ })).toBeNull();
+
+    // 全页 mailto 链接恰好一个 = 页脚那个（正文里的邮箱文本不会再变成第二个入口）
+    expect(screen.getAllByRole("link", { name: new RegExp(contact.email) })).toHaveLength(1);
   });
 
   // 演示环境**已接入**（`links.live` / `links.liveH5` 已填生产域名）之后的状态契约：
@@ -45,7 +63,8 @@ describe("作品集首页", () => {
     expect(enterLink).toHaveAttribute("href", expect.stringMatching(/^https:\/\//));
     expect(enterLink.getAttribute("href")).toBe(startLink.getAttribute("href"));
 
-    // 占位态与"邮件联系我试用"的兜底组合必须消失（已接入就不该再出现）
+    // 占位态必须消失（已接入就不该再出现）；卡片上的「邮件联系我试用」兜底入口也已移除 ——
+    // 联系方式全站只在页脚，页面上不该再出现第二个「发邮件」的入口。
     expect(screen.queryByRole("button", { name: "演示环境准备中" })).toBeNull();
   });
 
@@ -182,5 +201,20 @@ describe("联系方式工具函数", () => {
     });
 
     await expect(copyText(contact.email)).resolves.toBe(false);
+  });
+});
+
+// 「声明即校验」：联系方式本身也是数据 —— 写错了页面不会报错，
+// 只会静默少一个入口（`undefined`）或把访客送到 404（错地址）。
+describe("联系方式数据（src/lib/contact.ts）", () => {
+  it("署名与邮箱填齐；GitHub 若填，必须是 https 的公开仓库地址且不带尾斜杠", () => {
+    expect(contact.displayName.trim()).not.toBe("");
+    expect(contact.email).toMatch(/^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+
+    if (!contact.github) return; // 未填 = 页脚不渲染该入口（见 ContactFooter 的条件渲染）
+    expect(contact.github, "只填公开仓库：私有仓库访客点开是 404").toMatch(
+      /^https:\/\/github\.com\/[\w.-]+(\/[\w.-]+)?$/,
+    );
+    expect(contact.github.endsWith("/")).toBe(false);
   });
 });

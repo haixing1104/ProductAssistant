@@ -20,11 +20,11 @@ export const projects: Project[] = [
   {
     slug: "pa",
     name: "ProductAssistant 产品上线助手",
-    tagline: "电商内容供应链工作台：选品 → AI 生成 → 合规校验 → 人工审批 → 上线，一条链路跑完",
+    tagline: "电商内容供应链工作台：选品 → AI 生成商品图文详情 → 合规校验 → 人工审批HITL（第三方钉钉通知） → 上线，一条链路跑完",
     summary:
       "面向多租户的 B 端工作台。桌面工作台、移动端 H5 与 React Native 原生 App 三端共用一份契约核心层；" +
       "后端只做业务网关，AI 编排独立成一个引擎（LangGraph），两层用 Redis 消息流 + PostgreSQL 各自 schema 隔开，" +
-      "任意一层换语言重写都不影响另一层。",
+      "强解耦，任意一层换语言重写都不影响另一层。",
     period: "2025.09 – 至今",
     status: "shipped",
     stack: [

@@ -13,10 +13,6 @@ export default function App() {
     <>
       <Hero />
       <main id="projects" className="mx-auto max-w-5xl px-6 py-16 sm:py-20">
-        <h2 className="text-2xl font-semibold tracking-tight">作品</h2>
-        <p className="mt-3 text-sm text-ink-700 dark:text-ink-100/80">
-          以下为已完成的作品；后续项目会继续加在这一页（内容由 <code>src/data/projects.ts</code> 驱动）。
-        </p>
 
         <div className="mt-8 flex flex-col gap-8">
           {projects.map((project) => (

@@ -126,6 +126,8 @@ describe("作品卡：「开始使用」入口跟随当前端", () => {
       expect(screen.getByRole("button", { name: "App 下载暂未开放" })).toBeDisabled();
       expect(screen.getByText(/尚未上架应用商店/)).toBeTruthy();
       expect(screen.queryByRole("status")).toBeNull();
+      // 联系方式统一收在页脚：卡片上不再补一个「邮件联系我试用」入口
+      expect(screen.queryByRole("link", { name: /邮件/ })).toBeNull();
       const button = screen.getByRole("button", { name: /原生 App/ });
 
       fireEvent.click(button);
@@ -142,12 +144,14 @@ describe("作品卡：「开始使用」入口跟随当前端", () => {
 });
 
 describe("作品卡：没有入口地址时（生产现状）", () => {
-  it("标题行不渲染入口；底部仍是禁用占位 + 邮件联系（绝不给死链）", () => {
+  it("标题行不渲染入口；底部是禁用占位（邮件入口只在页脚，卡片不再重复）", () => {
     render(<ProjectCard project={{ ...project, links: {} }} />);
 
     expect(entryLink()).toBeNull();
     expect(screen.getByRole("button", { name: "演示环境准备中" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: /进入系统/ })).toBeNull();
+    // 唯一的行动点交给页脚：卡片上既不给死链，也不重复给邮件入口
+    expect(screen.queryByRole("link", { name: /邮件/ })).toBeNull();
   });
 });
 

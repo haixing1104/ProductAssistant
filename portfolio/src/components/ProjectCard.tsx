@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-import { contact, mailtoUrl } from "../lib/contact";
 import { APP_DOWNLOAD_NOTE, entryUrl } from "../lib/entry";
 import type { Platform, Project } from "../types";
 import DemoSwitcher from "./DemoSwitcher";
@@ -29,8 +28,9 @@ const TOAST_MS = 3200;
 // 「进入系统」的三态（也是将来接演示环境的唯一改动点）：
 //   · 入口基址有值（`links.live` / `links.liveH5`，或 dev 的 `VITE_ENTRY_*`）→ 真链接，新窗口打开；
 //   · 原生端            → **禁用态 + 一行原因**（App 没上架，浏览器里跳不过去）；
-//   · 没有值（生产未接入）→ **禁用态按钮 + 邮件联系**，并明确写出「为什么还不能进」。
+//   · 没有值（生产未接入）→ **禁用态按钮 + 一行原因**，并明确写出「为什么还不能进」。
 // 这就是为什么演示环境还没落地也能先把页面放出去：访客不会点进一个 404。
+// 联系方式（邮箱 / GitHub）统一收在页脚 `ContactFooter`：不在每张卡上重复放邮件入口。
 export default function ProjectCard({ project }: { project: Project }) {
   const [platform, setPlatform] = useState<Platform | undefined>(project.demos[0]?.platform);
   const [toast, setToast] = useState<string | null>(null);
@@ -93,15 +93,10 @@ export default function ProjectCard({ project }: { project: Project }) {
 
       <div className="mt-8 flex flex-wrap items-center gap-3">
         {unsupported ? (
-          <>
-            {/* 原生端：App 未上架 → 禁用态而不是死链；原因写在下面一行，不用点了才知道 */}
-            <button type="button" className="btn-disabled" disabled aria-disabled="true">
-              App 下载暂未开放
-            </button>
-            <a className="btn-ghost" href={mailtoUrl(contact.email, `${project.name} 试用申请`)}>
-              邮件联系我试用
-            </a>
-          </>
+          /* 原生端：App 未上架 → 禁用态而不是死链；原因写在下面一行，不用点了才知道 */
+          <button type="button" className="btn-disabled" disabled aria-disabled="true">
+            App 下载暂未开放
+          </button>
         ) : entry ? (
           <a
             className="btn-primary"
@@ -113,14 +108,10 @@ export default function ProjectCard({ project }: { project: Project }) {
             进入系统 →
           </a>
         ) : (
-          <>
-            <button type="button" className="btn-disabled" disabled aria-disabled="true">
-              演示环境准备中
-            </button>
-            <a className="btn-ghost" href={mailtoUrl(contact.email, `${project.name} 试用申请`)}>
-              邮件联系我试用
-            </a>
-          </>
+          /* 未接入：禁用态 + 下方一行「为什么还不能进」；联系方式统一在页脚，这里不再重复 */
+          <button type="button" className="btn-disabled" disabled aria-disabled="true">
+            演示环境准备中
+          </button>
         )}
         {project.links.repo && (
           <a className="btn-ghost" href={project.links.repo} target="_blank" rel="noreferrer noopener">
